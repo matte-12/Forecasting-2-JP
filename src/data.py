@@ -1,88 +1,56 @@
-import pandas as pd
-import numpy as np
-import torch
-from torch.utils.data import Dataset, DataLoader
-from sklearn.preprocessing import StandardScaler
+from pathlib import Path
 
-class TimeSeriesDataset(Dataset):
-    def __init__(self, csv_path, flag='train', seq_len=96, pred_len=24):
-        """
-        Args:
-            csv_path: percorso al file CSV (es. 'data/ETT-small/ETTh1.csv')
-            flag: 'train', 'val', o 'test' per gestire split e scaling
-            seq_len: finestra temporale di input (T)
-            pred_len: orizzonte di previsione (H)
-        """
-        assert flag in ['train', 'val', 'test']
-        self.seq_len = seq_len
-        self.pred_len = pred_len
-        self.flag = flag
+from torch.utils.data import DataLoader
 
-        # tengo solo i 7 canali numerici
-        df_raw = pd.read_csv(csv_path)
-        df_data = df_raw.drop(columns=['date'])
+from datasets.ett_dataset import TimeSeriesDataset
 
-        # split per ETT: 70% train, 10% val, 20% test
-        num_train = int(len(df_data) * 0.7)
-        num_val = int(len(df_data) * 0.1)
-        num_test = len(df_data) - num_train - num_val
 
-        # indici di partenza e fine
-        border1s = [0, num_train - self.seq_len, len(df_data) - num_test - self.seq_len]
-        border2s = [num_train, num_train + num_val, len(df_data)]
-        
-        type_map = {'train': 0, 'val': 1, 'test': 2}
-        idx = type_map[flag]
-        border1 = border1s[idx]
-        border2 = border2s[idx]
+def resolve_csv_path(csv_path):
+    """
+    Risolve un percorso CSV assoluto o relativo.
 
-        # scaling su train data
-        self.scaler = StandardScaler()
-        train_data = df_data.iloc[border1s[0]:border2s[0], :].values
-        self.scaler.fit(train_data)
+    - Se è assoluto, viene usato direttamente.
+    - Se è relativo, viene interpretato rispetto alla root del progetto.
+    """
+    csv_path = Path(csv_path).expanduser()
 
-        self.data_x = self.scaler.transform(df_data.values)
-        self.data_y  = self.data_x  # stessa serie?
+    if csv_path.is_absolute():
+        return csv_path
 
-        """
-        isolamento del contesto (prevenzione leakage), così le due istanze create in train.py sono separate:
-            train_dataset = TimeSeriesDataset(flag='train')
-            val_dataset = TimeSeriesDataset(flag='val')
-        """
-        self.data_x = self.data_x[border1:border2]
-        self.data_y = self.data_y[border1:border2]
+    project_root = Path(__file__).resolve().parent
+    return project_root / csv_path
 
-    def __len__(self):
-        return len(self.data_x) - self.seq_len - self.pred_len + 1
 
-    def __getitem__(self, index):
-        s_begin = index
-        s_end = s_begin + self.seq_len
-        r_begin = s_end
-        r_end = r_begin + self.pred_len
+def build_dataloader(config, flag):
+    """
+    Crea Dataset e DataLoader usando i parametri della configurazione.
+    """
+    csv_path = resolve_csv_path(config["csv_path"])
 
-        seq_x = self.data_x[s_begin:s_end]
-        seq_y = self.data_y[r_begin:r_end]
+    dataset = TimeSeriesDataset(
+        csv_path=csv_path,
+        flag=flag,
+        seq_len=config["seq_len"],
+        pred_len=config["pred_len"],
+    )
 
-        return torch.tensor(seq_x, dtype=torch.float32), torch.tensor(seq_y, dtype=torch.float32)
+    is_train = flag == "train"
 
-# test vari lavoraci te
-if __name__ == '__main__':
-    from pathlib import Path
+    dataloader = DataLoader(
+        dataset,
+        batch_size=config["batch_size"],
+        shuffle=(
+            config.get("shuffle_train", True)
+            if is_train
+            else False
+        ),
+        num_workers=config.get("num_workers", 0),
+        drop_last=(
+            config.get("drop_last_train", True)
+            if is_train
+            else False
+        ),
+        pin_memory=config.get("pin_memory", False),
+    )
 
-    # absolute path    
-    current_file_path = Path(__file__).resolve()
-    project_root = current_file_path.parent.parent
-    csv_path = project_root / 'data' / 'ETT-small' / 'ETTh1.csv'
-    
-    try:
-        dataset = TimeSeriesDataset(csv_path=str(csv_path), flag='train')
-        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-        
-        x, y = next(iter(dataloader))
-        print(f"ok dataloader:")
-        print(f"Input Shape [B, T, C]:  {x.shape}")
-        print(f"Output Shape [B, H, C]: {y.shape}")
-        
-    except Exception as e:
-        print(f"Test Fallito: {e}")
+    return dataset, dataloader
