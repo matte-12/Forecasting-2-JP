@@ -3,7 +3,7 @@
 CONFIG = {
     # Dataset
     "dataset_name": "ETTh1",
-    "csv_path": "data/ETT-small/ETTh1.csv",
+    "csv_path": "/content/drive/MyDrive/dataset_forecast/ETT-small/ETTh1.csv",
 
     # Dimensioni temporali
     # ETTh1 ha frequenza oraria: 1 timestep = 1 ora
