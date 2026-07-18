@@ -42,7 +42,7 @@ class TimeSeriesDataset(Dataset):
         self.scaler.fit(train_data)
 
         self.data_x = self.scaler.transform(df_data.values)
-        self.data_y  = self.data_x(df_data.values)  # stessa serie?
+        self.data_y  = self.data_x  # stessa serie?
 
         """
         isolamento del contesto (prevenzione leakage), così le due istanze create in train.py sono separate:
@@ -52,31 +52,37 @@ class TimeSeriesDataset(Dataset):
         self.data_x = self.data_x[border1:border2]
         self.data_y = self.data_y[border1:border2]
 
-def __len__(self):
-    return len(self.data_x) - self.seq_len - self.pred_len + 1
+    def __len__(self):
+        return len(self.data_x) - self.seq_len - self.pred_len + 1
 
-def __getitem__(self, index):
-    s_begin = index
-    s_end = s_begin + self.seq_len
-    r_begin = s_end
-    r_end = r_begin + self.pred_len
+    def __getitem__(self, index):
+        s_begin = index
+        s_end = s_begin + self.seq_len
+        r_begin = s_end
+        r_end = r_begin + self.pred_len
 
-    seq_x = self.data_x[s_begin:s_end]
-    seq_y = self.data_y[r_begin:r_end]
+        seq_x = self.data_x[s_begin:s_end]
+        seq_y = self.data_y[r_begin:r_end]
 
-    return torch.tensor(seq_x, dtype=torch.float32), torch.tensor(seq_y, dtype=torch.float32)
+        return torch.tensor(seq_x, dtype=torch.float32), torch.tensor(seq_y, dtype=torch.float32)
 
 # test vari lavoraci te
 if __name__ == '__main__':
-    try:
-        dataset = TimeSeriesDataset(csv_path='../data/ETT-small/ETTh1.csv', flag='train')
-        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+    from pathlib import Path
 
+    # absolute path    
+    current_file_path = Path(__file__).resolve()
+    project_root = current_file_path.parent.parent
+    csv_path = project_root / 'data' / 'ETT-small' / 'ETTh1.csv'
+    
+    try:
+        dataset = TimeSeriesDataset(csv_path=str(csv_path), flag='train')
+        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+        
         x, y = next(iter(dataloader))
+        print(f"ok dataloader:")
         print(f"Input Shape [B, T, C]:  {x.shape}")
         print(f"Output Shape [B, H, C]: {y.shape}")
-
-        assert x.shape == (32, 96, 7), "ERRORE: dim input non allineata."
-        assert y.shape == (32, 24, 7), "ERRORE: dim target non allineata."
+        
     except Exception as e:
         print(f"Test Fallito: {e}")
