@@ -1,8 +1,6 @@
 from pathlib import Path
-
 from torch.utils.data import DataLoader
-
-from datasets.ett_dataset import TimeSeriesDataset
+from src.ett_dataset import TimeSeriesDataset
 
 
 def resolve_csv_path(csv_path):
@@ -17,7 +15,7 @@ def resolve_csv_path(csv_path):
     if csv_path.is_absolute():
         return csv_path
 
-    project_root = Path(__file__).resolve().parent
+    project_root = Path(__file__).resolve().parent.parent
     return project_root / csv_path
 
 

@@ -3,7 +3,7 @@
 CONFIG = {
     # Dataset
     "dataset_name": "ETTm1",
-    "csv_path": "/content/drive/MyDrive/dataset_forecast/ETT-small/ETTm1.csv",
+    "csv_path": "data/ETT-small/ETTm1.csv",
 
     # ETTm1: un timestep ogni 15 minuti
     # 96 timestep = 24 ore di input
