@@ -2,8 +2,7 @@ from pathlib import Path
 
 from torch.utils.data import DataLoader
 
-from datasets.ett_dataset import TimeSeriesDataset
-
+from src.ett_dataset import TimeSeriesDataset
 
 def resolve_csv_path(csv_path):
     """

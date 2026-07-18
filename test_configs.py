@@ -1,7 +1,7 @@
 import argparse
 import importlib
 
-from data import build_dataloader
+from src.data import build_dataloader
 
 
 def load_config(config_name):
