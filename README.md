@@ -4,6 +4,19 @@ link accesso dataset nel drive:
 https://drive.google.com/drive/folders/1pDeHKnxl-YRXAQDdhigfw5QzBBjZUEkb?usp=sharing
 
 
+# roadmap
+
+- Isolamento e validazione della shape [32, 96, 7] -> [32, 24, 7].
+
+- Baseline 1D causale pura (MLP/CNN).
+
+- Modello 2D forzato su periodi fissi noti (hardcoding di 24h e 168h).
+
+- Attivazione della FFT dinamica e confronto dei gradienti di errore rispetto al costo computazionale O(T log T).
+
+- Ablazione architetturale (LOO) sui pesi del blocco Inception.
+
+
 # note varie 
 dataset ETTh1 ha 7 feature numeriche, impone quindi [B, 96, 7] -> [B, 24, 7]
 
