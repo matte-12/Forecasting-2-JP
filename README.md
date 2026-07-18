@@ -4,17 +4,20 @@ link accesso dataset nel drive:
 https://drive.google.com/drive/folders/1pDeHKnxl-YRXAQDdhigfw5QzBBjZUEkb?usp=sharing
 
 
-# roadmap
+# da fare
 
-- Isolamento e validazione della shape [32, 96, 7] -> [32, 24, 7].
-
-- Baseline 1D causale pura (MLP/CNN).
-
-- Modello 2D forzato su periodi fissi noti (hardcoding di 24h e 168h).
-
-- Attivazione della FFT dinamica e confronto dei gradienti di errore rispetto al costo computazionale O(T log T).
-
-- Ablazione architetturale (LOO) sui pesi del blocco Inception.
+1. Implementazione della classe `TimeSeriesDataset` per il dataset ETT in `src/data.py`, confinando l'operazione di *fit* dello scaler al solo training set per annullare il rischio di *data leakage*.
+2. Validazione tecnica del contratto tensoriale, isolando un *dummy batch* per garantire che il dataloader emetta iterativamente vettori con shape `[B, T, C]` in input e `[B, H, C]` in output.
+3. Centralizzazione degli iperparametri architetturali, fissando staticamente la finestra storica di osservazione a $T=96$ e limitando l'analisi a soli due orizzonti predittivi rappresentativi ($H=24$ e $H=96$).
+4. Sviluppo di una singola architettura *competitor* in `src/models_1d.py` (CNN Causale 1D o DLinear) per definire un *lower-bound* prestazionale univoco.
+5. Sviluppo del ciclo di ottimizzazione *orchestator* in `src/train.py`, iniettando MSE MAE e MASE.
+6. Esecuzione di un addestramento *end-to-end* completo sulla baseline 1D per effettuare il *debugging* infrastrutturale, verificando l'assenza di *memory leak* o deviazioni nei gradienti.
+7. Sviluppo dello scheletro architetturale in `src/models_2d.py`, incapsulando le trasposizioni tensoriali necessarie all'astrazione di PyTorch strettamente all'interno del metodo `forward()`.
+8. Implementazione della variante 2D statica, forzando la logica di *reshaping* topologico su periodi deterministici *hardcoded*, derivati dalla frequenza di campionamento fisica di ETT (es. 24, 168).
+9. Sviluppo del modulo algoritmico dinamico, iniettando la Fast Fourier Transform (FFT) nel *TimesBlock* per l'estrazione *run-time* delle ampiezze spettrali *top-k* e conseguente partizionamento del tensore 2D.
+10. Avvio sistematico degli addestramenti comparativi (Baseline 1D vs 2D Hardcoded vs 2D FFT) mantenendo invariati i seed stocastici e testando i due orizzonti predittivi selezionati.
+11. Estrazione formale delle metriche per valutare i margini di errore predittivo in relazione all'overhead computazionale introdotto dalla risoluzione dello spettro frequenziale.
+12. (Backlog) Esecuzione dello studio di ablazione *Leave-One-Out* per la contrazione della complessità spaziale, degradando i layer Inception densi in favore di convoluzioni *lightweight* standard.
 
 
 # note varie 
@@ -215,3 +218,19 @@ Nicola Ranzolin
 Matteo Gidoni
 
 
+Cari Nicola e Matteo,
+mi sembra una bella roadmap e le scelte mi sembrano coerenti. Tuttavia, il progetto mi sembra piuttosto ampio (ovviamente dipende da quanto decidiate di approfondire ogni step). Personalmente, consiglierei di limitare i modelli a quelli che ritenete più rappresentativi.
+
+Edge Case: un breve esperimento su un dataset finanziario. L’obiettivo non è massimizzare le performance, ma dimostrare criticamente che l’estrazione dei periodi (FFT) collassa estraendo rumore in un contesto a bassa periodicità e ridotto Signal-to-Noise Ratio.
+Il dataset finanziario è sicuramente una possibilità intrigante, ma lo tratterei con cautela. I dati di mercato sono spesso rumorosi, poco periodici e molto difficili da modellare; come potete verificare anche in letteratura, i risultati sono spesso poco convincenti. Tuttavia un eventuale peggioramento delle performance potrebbe dipendere da molti fattori diversi, non necessariamente dall’estrazione dei periodi tramite FFT. Vi suggerirei quindi di chiarire come intendete misurare questo “collasso”.
+
+Una volta validata l’architettura 2D, svolgeremo un’ablazione Leave-One-Out con l’obiettivo di studiare il compromesso tra complessità computazionale e accuratezza, senza moltiplicare il numero di esperimenti. In particolare confronteremo:
+L’ablation sulla complessità la trovo personalmente molto interessante; anche questa, però, la considererei come uno studio aggiuntivo, da fare se avrete tempo.
+
+Per contenere i tempi sperimentali complessivi, stavamo valutando di limitare la valutazione a uno o pochi orizzonti predittivi rappresentativi e concentrare l’analisi sul confronto tra le architetture e sulle relative ablazioni, evitando la replicazione sistematica dei test su diversi orizzonti di previsione.
+Mi sembra una decisione sensata. Scegliete 2-3 orizzonti che ritenete rappresentativi e valutate tutti i modelli in modo equo sugli stessi setting.
+
+In generale, la direzione mi sembra valida, ma cercherei di evitare di fare troppe cose con il rischio di approfondirle poco.
+
+Un saluto,
+Aidin
