@@ -7,9 +7,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch import optim
-from torch.utils.data import DataLoader
 
-from src.data import TimeSeriesDataset, build_dataloader
+from src.data import build_dataloader
 from src.models_1d import DLinear, CausalTCN
 from src.models_2d import TimesNet
 
