@@ -8,198 +8,146 @@ from torch.utils.data import Dataset
 
 
 class TimeSeriesDataset(Dataset):
+    """
+    Dataset per ETTh1 ed ETTm1.
+
+    Restituisce:
+        x: finestra di input con shape (seq_len, num_features)
+        y: finestra futura con shape (pred_len, num_features)
+    """
+
     def __init__(
         self,
-        csv_path,
-        flag="train",
-        seq_len=96,
-        pred_len=24,
+        csv_path: str,
+        flag: str,
+        seq_len: int,
+        pred_len: int,
     ):
-        """
-        Dataset multivariato per ETTh1, ETTh2, ETTm1 ed ETTm2.
-
-        Args:
-            csv_path:
-                Percorso assoluto o relativo al file CSV.
-
-            flag:
-                Split da utilizzare: "train", "val" oppure "test".
-
-            seq_len:
-                Numero di timestep della finestra di input.
-
-            pred_len:
-                Numero di timestep futuri da prevedere.
-        """
+        # Controllo dello split richiesto
         if flag not in {"train", "val", "test"}:
-            raise ValueError(
-                "flag deve essere 'train', 'val' oppure 'test'."
-            )
+            raise ValueError("flag deve essere train, val oppure test")
 
-        if seq_len <= 0:
-            raise ValueError("seq_len deve essere maggiore di zero.")
+        # seq_len e pred_len devono arrivare dal file YAML
+        if seq_len <= 0 or pred_len <= 0:
+            raise ValueError("seq_len e pred_len devono essere positivi")
 
-        if pred_len <= 0:
-            raise ValueError("pred_len deve essere maggiore di zero.")
+        csv_path = Path(csv_path)
 
-        self.csv_path = Path(csv_path).expanduser()
-        self.flag = flag
+        if not csv_path.exists():
+            raise FileNotFoundError(f"CSV non trovato: {csv_path}")
+
         self.seq_len = seq_len
         self.pred_len = pred_len
 
-        if not self.csv_path.exists():
-            raise FileNotFoundError(
-                f"File CSV non trovato:\n{self.csv_path}"
-            )
+        # Lettura del dataset
+        df = pd.read_csv(csv_path)
 
-        # Lettura del CSV.
-        df_raw = pd.read_csv(self.csv_path)
+        if "date" not in df.columns:
+            raise ValueError("Il CSV deve contenere la colonna 'date'")
 
-        if "date" not in df_raw.columns:
-            raise ValueError(
-                "Il CSV deve contenere una colonna chiamata 'date'."
-            )
+        # Rimuoviamo la data e manteniamo le 7 feature numeriche
+        values = df.drop(columns=["date"]).to_numpy(dtype=np.float32)
+   
 
-        # Manteniamo solo i canali numerici.
-        df_data = df_raw.drop(columns=["date"])
+        # Salviamo il numero di feature
+        self.num_features = values.shape[1]
 
-        if df_data.empty:
-            raise ValueError(
-                "Il CSV non contiene colonne numeriche utilizzabili."
-            )
+        # Split temporale: 70% train, 10% validation, 20% test
+        n = len(values)
+        train_end = int(n * 0.7)
+        val_end = int(n * 0.8)
 
-        non_numeric_columns = [
-            column
-            for column in df_data.columns
-            if not pd.api.types.is_numeric_dtype(df_data[column])
-        ]
-
-        if non_numeric_columns:
-            raise ValueError(
-                "Sono presenti colonne non numeriche: "
-                f"{non_numeric_columns}"
-            )
-
-        values = df_data.to_numpy(dtype=np.float32)
-
-        self.feature_names = list(df_data.columns)
-        self.num_features = len(self.feature_names)
-
-        # Split 70% train, 10% validation, 20% test.
-        num_samples = len(values)
-        num_train = int(num_samples * 0.7)
-        num_val = int(num_samples * 0.1)
-        num_test = num_samples - num_train - num_val
-
-        # Validation e test includono seq_len timestep precedenti,
-        # necessari per costruire la prima finestra di input.
-        border1s = {
-            "train": 0,
-            "val": num_train - self.seq_len,
-            "test": num_train + num_val - self.seq_len,
-        }
-
-        border2s = {
-            "train": num_train,
-            "val": num_train + num_val,
-            "test": num_samples,
-        }
-
-        border1 = border1s[flag]
-        border2 = border2s[flag]
-
-        if border1 < 0:
-            raise ValueError(
-                f"seq_len={self.seq_len} è troppo grande "
-                f"per lo split '{flag}'."
-            )
-
-        # Lo scaler viene adattato esclusivamente sui dati di training.
+        # Lo scaler viene addestrato solo sui dati di training
         self.scaler = StandardScaler()
-        self.scaler.fit(values[:num_train])
+        self.scaler.fit(values[:train_end])
 
-        scaled_values = self.scaler.transform(values).astype(
-            np.float32
-        )
+        # Tutti gli split vengono trasformati con lo stesso scaler
+        values = self.scaler.transform(values).astype(np.float32)
 
-        # Isoliamo lo split selezionato.
-        self.data_x = scaled_values[border1:border2]
+        if flag == "train":
+            split = values[:train_end]
 
-        # Input e target appartengono alla stessa serie multivariata.
-        # Non è una copia separata: è sufficiente conservare un array.
-        self.data_y = self.data_x
+        elif flag == "val":
+            # Manteniamo seq_len punti precedenti per creare
+            # la prima finestra di validation
+            split = values[train_end - seq_len:val_end]
 
-        if len(self) <= 0:
+        else:
+            # Stessa logica per il test set
+            split = values[val_end - seq_len:]
+
+        self.data = torch.from_numpy(split)
+
+        # Numero totale di finestre disponibili nello split
+        self.length = len(self.data) - seq_len - pred_len + 1
+
+        if self.length <= 0:
             raise ValueError(
-                f"Lo split '{flag}' non contiene abbastanza dati per "
-                f"seq_len={self.seq_len} e pred_len={self.pred_len}."
+                f"Split troppo corto per seq_len={seq_len}, "
+                f"pred_len={pred_len}"
             )
 
     def __len__(self):
-        """
-        Numero totale di finestre disponibili.
-        """
-        return (
-            len(self.data_x)
-            - self.seq_len
-            - self.pred_len
-            + 1
-        )
-
+        return self.length
     def __getitem__(self, index):
         """
-        Restituisce:
-
-            seq_x: [seq_len, num_features]
-            seq_y: [pred_len, num_features]
+        Restituisce una coppia:
+            x: input con shape (seq_len, num_features)
+            y: target con shape (pred_len, num_features)
         """
-        if index < 0 or index >= len(self):
-            raise IndexError(
-                f"Indice {index} non valido. "
-                f"Il dataset contiene {len(self)} finestre."
-            )
 
-        input_start = index
-        input_end = input_start + self.seq_len
+        # Finestra di input
+        x_start = index
+        x_end = x_start + self.seq_len
 
-        target_start = input_end
-        target_end = target_start + self.pred_len
+        # Finestra futura da prevedere
+        y_start = x_end
+        y_end = y_start + self.pred_len
 
-        seq_x = self.data_x[input_start:input_end]
-        seq_y = self.data_y[target_start:target_end]
+        x = self.data[x_start:x_end]
+        y = self.data[y_start:y_end]
 
-        return (
-            torch.from_numpy(seq_x),
-            torch.from_numpy(seq_y),
-        )
+        return x, y
 
     def inverse_transform(self, data):
         """
-        Riporta dati standardizzati alla scala originale.
+        Riporta i dati standardizzati alla scala originale.
 
-        Accetta tensori o array con forma [..., num_features].
+        Accetta:
+            - torch.Tensor
+            - np.ndarray
+
+        Shape attesa:
+            (..., num_features)
         """
+
         is_tensor = torch.is_tensor(data)
 
+        # Convertiamo temporaneamente in NumPy
         if is_tensor:
             original_device = data.device
             original_dtype = data.dtype
-            data_numpy = data.detach().cpu().numpy()    # usa cuda o mps se disponibile
+            data_numpy = data.detach().cpu().numpy()
         else:
             data_numpy = np.asarray(data)
 
         original_shape = data_numpy.shape
 
+        # Controllo della dimensione delle feature
         if original_shape[-1] != self.num_features:
             raise ValueError(
                 f"L'ultima dimensione deve essere "
                 f"{self.num_features}, ricevuta {original_shape[-1]}."
             )
 
+        # StandardScaler accetta input 2D
         flattened = data_numpy.reshape(-1, self.num_features)
+
+        # Ritorno alla scala originale
         restored = self.scaler.inverse_transform(flattened)
         restored = restored.reshape(original_shape)
 
+        # Se l'input era un tensore, restituiamo un tensore
         if is_tensor:
             return torch.as_tensor(
                 restored,
