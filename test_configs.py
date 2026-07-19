@@ -1,71 +1,86 @@
-import argparse
-import importlib
+from pathlib import Path
 
-from src.data import build_dataloader
+import yaml
+
+from src.data import create_dataloaders
 
 
-def load_config(config_name):
-    module = importlib.import_module(f"configs.{config_name}")
+# File YAML da controllare
+CONFIG_PATHS = [
+    "configs/etth1.yaml",
+    "configs/ettm1.yaml",
+]
 
-    if not hasattr(module, "CONFIG"):
-        raise AttributeError(
-            f"Il file configs/{config_name}.py "
-            "non contiene la variabile CONFIG."
+
+def load_config(path: str) -> dict:
+    """Carica un file YAML e restituisce un dizionario Python."""
+
+    config_path = Path(path)
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config non trovato: {config_path}")
+
+    with config_path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if not isinstance(config, dict):
+        raise ValueError(f"Config YAML non valido: {config_path}")
+
+    return config
+
+
+def test_config(config_path: str):
+    """
+    Controlla tutti i pred_len presenti nel file YAML.
+
+    Verifica che le shape dei batch siano corrette.
+    """
+
+    config = load_config(config_path)
+
+    # Testiamo ogni orizzonte definito nel YAML
+    for pred_len in config["time"]["pred_lens"]:
+        train_loader, _, _ = create_dataloaders(
+            config=config,
+            pred_len=pred_len,
         )
 
-    return module.CONFIG
+        # Estraiamo il primo batch
+        x, y = next(iter(train_loader))
 
+        expected_x = (
+            config["dataloader"]["batch_size"],
+            config["time"]["seq_len"],
+            config["model"]["num_features"],
+        )
 
-def main():
-    parser = argparse.ArgumentParser()
+        expected_y = (
+            config["dataloader"]["batch_size"],
+            pred_len,
+            config["model"]["num_features"],
+        )
 
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help=(
-            "Nome del file di configurazione senza .py, "
-            "ad esempio ettm1_24."
-        ),
-    )
+        # x deve avere shape: batch, seq_len, feature
+        assert tuple(x.shape) == expected_x, (
+            f"Shape input errata: {tuple(x.shape)}, "
+            f"attesa: {expected_x}"
+        )
 
-    args = parser.parse_args()
-    config = load_config(args.config)
+        # y deve avere shape: batch, pred_len, feature
+        assert tuple(y.shape) == expected_y, (
+            f"Shape target errata: {tuple(y.shape)}, "
+            f"attesa: {expected_y}"
+        )
 
-    train_dataset, train_loader = build_dataloader(
-        config,
-        flag="train",
-    )
-
-    val_dataset, val_loader = build_dataloader(
-        config,
-        flag="val",
-    )
-
-    test_dataset, test_loader = build_dataloader(
-        config,
-        flag="test",
-    )
-
-    x, y = next(iter(train_loader))
-
-    print("Configurazione caricata correttamente")
-    print(f"Dataset: {config['dataset_name']}")
-    print(f"CSV: {train_dataset.csv_path}")
-    print(f"Feature: {train_dataset.feature_names}")
-    print(f"Numero feature: {train_dataset.num_features}")
-    print(f"seq_len: {train_dataset.seq_len}")
-    print(f"pred_len: {train_dataset.pred_len}")
-    print()
-
-    print(f"Finestre train: {len(train_dataset)}")
-    print(f"Finestre validation: {len(val_dataset)}")
-    print(f"Finestre test: {len(test_dataset)}")
-    print()
-
-    print(f"Input [B, T, C]: {x.shape}")
-    print(f"Target [B, H, C]: {y.shape}")
+        print(
+            f"{config['dataset']['name']} | "
+            f"pred_len={pred_len} | "
+            f"x={tuple(x.shape)} | "
+            f"y={tuple(y.shape)}"
+        )
 
 
 if __name__ == "__main__":
-    main()
+    # Controllo di tutti i file YAML
+    for config_path in CONFIG_PATHS:
+        test_config(config_path)

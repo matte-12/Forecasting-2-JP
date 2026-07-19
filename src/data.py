@@ -1,54 +1,74 @@
-from pathlib import Path
 from torch.utils.data import DataLoader
+
 from src.ett_dataset import TimeSeriesDataset
 
 
-def resolve_csv_path(csv_path):
+def create_dataloaders(config: dict, pred_len: int):
     """
-    Risolve un percorso CSV assoluto o relativo.
+    Crea i DataLoader di train, validation e test.
 
-    - Se è assoluto, viene usato direttamente.
-    - Se è relativo, viene interpretato rispetto alla root del progetto.
+    Args:
+        config: configurazione letta dal file YAML
+        pred_len: singolo orizzonte scelto per il training
     """
-    csv_path = Path(csv_path).expanduser()
 
-    if csv_path.is_absolute():
-        return csv_path
+    # Il pred_len scelto deve essere presente nella lista del YAML
+    allowed_pred_lens = config["time"]["pred_lens"]
 
-    project_root = Path(__file__).resolve().parent.parent
-    return project_root / csv_path
+    if pred_len not in allowed_pred_lens:
+        raise ValueError(
+            f"pred_len={pred_len} non ammesso. "
+            f"Valori disponibili: {allowed_pred_lens}"
+        )
 
+    # Parametri comuni ai tre split
+    dataset_args = {
+        "csv_path": config["dataset"]["csv_path"],
+        "seq_len": config["time"]["seq_len"],
+        "pred_len": pred_len,
+    }
 
-def build_dataloader(config, flag):
-    """
-    Crea Dataset e DataLoader usando i parametri della configurazione.
-    """
-    csv_path = resolve_csv_path(config["csv_path"])
-
-    dataset = TimeSeriesDataset(
-        csv_path=csv_path,
-        flag=flag,
-        seq_len=config["seq_len"],
-        pred_len=config["pred_len"],
+    train_dataset = TimeSeriesDataset(
+        flag="train",
+        **dataset_args,
     )
 
-    is_train = flag == "train"
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size=config["batch_size"],
-        shuffle=(
-            config.get("shuffle_train", True)
-            if is_train
-            else False
-        ),
-        num_workers=config.get("num_workers", 0),
-        drop_last=(
-            config.get("drop_last_train", True)
-            if is_train
-            else False
-        ),
-        pin_memory=config.get("pin_memory", False),
+    val_dataset = TimeSeriesDataset(
+        flag="val",
+        **dataset_args,
     )
 
-    return dataset, dataloader
+    test_dataset = TimeSeriesDataset(
+        flag="test",
+        **dataset_args,
+    )
+
+    loader_cfg = config["dataloader"]
+
+    # Il training viene mescolato
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=loader_cfg["batch_size"],
+        shuffle=loader_cfg["shuffle_train"],
+        num_workers=loader_cfg["num_workers"],
+        drop_last=loader_cfg["drop_last_train"],
+    )
+
+    # Validation e test non devono essere mescolati
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=loader_cfg["batch_size"],
+        shuffle=False,
+        num_workers=loader_cfg["num_workers"],
+        drop_last=False,
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=loader_cfg["batch_size"],
+        shuffle=False,
+        num_workers=loader_cfg["num_workers"],
+        drop_last=False,
+    )
+
+    return train_loader, val_loader, test_loader
