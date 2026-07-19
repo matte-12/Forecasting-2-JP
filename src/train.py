@@ -2,8 +2,8 @@ import argparse
 import importlib
 import time
 from pathlib import Path
-import numpy as np
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch import optim
@@ -45,7 +45,10 @@ class EarlyStopping:
 
     def save_checkpoint(self, val_loss, model):
         if self.verbose:
-            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model...')
+            print(
+                f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). '
+                'Saving model...'
+            )
         torch.save(model.state_dict(), self.path)
         self.val_loss_min = val_loss
 
@@ -100,6 +103,21 @@ def get_device():
         return torch.device("mps")  # metal, macos
     return torch.device("cpu")
 
+def build_checkpoint_path(project_root, args, config):
+    suffix_parts = []
+
+    if not config.get("use_fft", True):
+        suffix_parts.append("noFFT")
+
+    if not config.get("use_inception", True):
+        suffix_parts.append("noIncep")
+
+    suffix = "" if not suffix_parts else "_" + "_".join(suffix_parts)
+
+    return project_root / (
+        f"{args.model}_{config['dataset_name']}_H{config['pred_len']}{suffix}_checkpoint.pth"
+    )
+
 def main():
     # parametri poi li mettiamo in un config.yaml ? attualmente gestiti con 6 comandi separati per isolare 
     # i modelli e poter fare training separato
@@ -111,12 +129,19 @@ def main():
     enc_in = config["num_features"]
     learning_rate = config["learning_rate"]
     epochs = config["epochs"]
-    
+    top_k = config.get("top_k", 3)
+    use_fft = config.get("use_fft", True)
+    fixed_period = config.get("fixed_period", 24)
+    use_inception = config.get("use_inception", True)
+
     project_root = Path(__file__).resolve().parent.parent
-    checkpoint_path = project_root / f"{args.model}_{config['dataset_name']}_H{config['pred_len']}_checkpoint.pth"
+    checkpoint_path = build_checkpoint_path(project_root, args, config)
 
     device = get_device()
-    print(f"Avvio Training: Modello={args.model}, Config={args.config}, Dispositivo={device}")
+    print(
+        f"Avvio Training: Modello={args.model}, "
+        f"Config={args.config}, Dispositivo={device}"
+    )
 
     train_dataset, train_loader = build_dataloader(config, flag="train")
     val_dataset, val_loader = build_dataloader(config, flag="val")
@@ -125,13 +150,26 @@ def main():
     model_dict = {
         "DLinear": DLinear(seq_len, pred_len, enc_in),
         "CausalTCN": CausalTCN(seq_len, pred_len, enc_in),
-        "TimesNet": TimesNet(seq_len, pred_len, enc_in, d_model=32, top_k=3)
+        "TimesNet": TimesNet(
+            seq_len=seq_len,
+            pred_len=pred_len,
+            enc_in=enc_in,
+            d_model=32,
+            top_k=top_k,
+            use_fft=use_fft,
+            fixed_period=fixed_period,
+            use_inception=use_inception,
+        ),
     }
     
     model = model_dict[args.model].to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
-    early_stopping = EarlyStopping(patience=5, verbose=True, path=str(checkpoint_path))
+    early_stopping = EarlyStopping(
+        patience=5,
+        verbose=True,
+        path=str(checkpoint_path),
+    )
 
     for epoch in range(epochs):
         model.train()
@@ -162,7 +200,10 @@ def main():
         val_loss_avg = np.average(val_loss)
         epoch_time = time.time() - epoch_start_time
         
-        print(f"Epoch: {epoch + 1}/{epochs} | Time: {epoch_time:.2f}s | Train Loss: {train_loss_avg:.4f} | Val Loss: {val_loss_avg:.4f}")
+        print(
+            f"Epoch: {epoch + 1}/{epochs} | Time: {epoch_time:.2f}s | "
+            f"Train Loss: {train_loss_avg:.4f} | Val Loss: {val_loss_avg:.4f}"
+        )
         
         early_stopping(val_loss_avg, model)
         if early_stopping.early_stop:

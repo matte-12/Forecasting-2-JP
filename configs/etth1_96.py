@@ -1,8 +1,8 @@
-# ETTm1, input fisso a 96, predizione a 96
+# ETTh1, input fisso a 96, predizione a 96
 
 CONFIG = {
-    "dataset_name": "ETTm1",
-    "csv_path": "data/ETT-small/ETTm1.csv",
+    "dataset_name": "ETTh1",
+    "csv_path": "data/ETT-small/ETTh1.csv",
     "seq_len": 96,
     "pred_len": 96,
     "batch_size": 32,
