@@ -4,6 +4,19 @@ link accesso dataset nel drive:
 https://drive.google.com/drive/folders/1pDeHKnxl-YRXAQDdhigfw5QzBBjZUEkb?usp=sharing
 
 
+# come testare
+
+python test_configs.py --config etth1_24
+python test_configs.py --config etth1_48
+python test_configs.py --config etth1_96
+python test_configs.py --config ettm1_24
+python test_configs.py --config ettm1_48
+python test_configs.py --config ettm1_96
+
+python -m src.train --config etth1_24 --model TimesNet
+python -m src.train --config etth1_24 --model TimesNet
+python -m src.train --config ettm1_24 --model TimesNet
+
 # da fare
 
 1. Implementazione della classe `TimeSeriesDataset` per il dataset ETT in `src/data.py`, confinando l'operazione di *fit* dello scaler al solo training set per annullare il rischio di *data leakage*.
@@ -234,3 +247,13 @@ In generale, la direzione mi sembra valida, ma cercherei di evitare di fare trop
 
 Un saluto,
 Aidin
+
+---
+
+ok perfetto allora mettiamo seq len a 96 fissa, per quanto riguarda i pred len 24 48 e 96 per breve medio e lungo termine anche se in letteratura ho visto 336 e 720 
+
+unifichiamo il setup numerico per h1 e m1 infatti studiando online ho visto che p proprio da prassi dei benchmark di ML e nel paper stesso valutare i modelli con gli stessi tensori identici [B, 96, C] a prescindere dalla natura fisica dei dati
+
+attenzione che in etth1 seq len 96 sono 4 giorni quindi fft del modello 2d funziona bene perché ha potenziali pattern che si ripetono 4 volte, invece seq len 96 per m1 sarebbero 24 ore di storico quindi la 2d non ha vantaggio. ragioniamo se fare qualche multiplo di 96?
+
+per ora teniamo tutto a 96 poi proviamo come esperimento aggiuntivo 192+ per m1
