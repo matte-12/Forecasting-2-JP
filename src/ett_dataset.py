@@ -47,6 +47,10 @@ class TimeSeriesDataset(Dataset):
 
         # Rimuoviamo la data e manteniamo le 7 feature numeriche
         values = df.drop(columns=["date"]).to_numpy(dtype=np.float32)
+   
+
+        # Salviamo il numero di feature
+        self.num_features = values.shape[1]
 
         # Split temporale: 70% train, 10% validation, 20% test
         n = len(values)
@@ -85,13 +89,18 @@ class TimeSeriesDataset(Dataset):
 
     def __len__(self):
         return self.length
-
     def __getitem__(self, index):
-        # Intervallo della finestra di input
+        """
+        Restituisce una coppia:
+            x: input con shape (seq_len, num_features)
+            y: target con shape (pred_len, num_features)
+        """
+
+        # Finestra di input
         x_start = index
         x_end = x_start + self.seq_len
 
-        # La previsione parte subito dopo la finestra di input
+        # Finestra futura da prevedere
         y_start = x_end
         y_end = y_start + self.pred_len
 
@@ -99,3 +108,51 @@ class TimeSeriesDataset(Dataset):
         y = self.data[y_start:y_end]
 
         return x, y
+
+    def inverse_transform(self, data):
+        """
+        Riporta i dati standardizzati alla scala originale.
+
+        Accetta:
+            - torch.Tensor
+            - np.ndarray
+
+        Shape attesa:
+            (..., num_features)
+        """
+
+        is_tensor = torch.is_tensor(data)
+
+        # Convertiamo temporaneamente in NumPy
+        if is_tensor:
+            original_device = data.device
+            original_dtype = data.dtype
+            data_numpy = data.detach().cpu().numpy()
+        else:
+            data_numpy = np.asarray(data)
+
+        original_shape = data_numpy.shape
+
+        # Controllo della dimensione delle feature
+        if original_shape[-1] != self.num_features:
+            raise ValueError(
+                f"L'ultima dimensione deve essere "
+                f"{self.num_features}, ricevuta {original_shape[-1]}."
+            )
+
+        # StandardScaler accetta input 2D
+        flattened = data_numpy.reshape(-1, self.num_features)
+
+        # Ritorno alla scala originale
+        restored = self.scaler.inverse_transform(flattened)
+        restored = restored.reshape(original_shape)
+
+        # Se l'input era un tensore, restituiamo un tensore
+        if is_tensor:
+            return torch.as_tensor(
+                restored,
+                dtype=original_dtype,
+                device=original_device,
+            )
+
+        return restored
