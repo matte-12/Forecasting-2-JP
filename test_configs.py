@@ -1,36 +1,37 @@
-import argparse
-import importlib
+from pathlib import Path
+
+import yaml
 
 from src.data import build_dataloader
 
 
-def load_config(config_name):
-    module = importlib.import_module(f"configs.{config_name}")
-
-    if not hasattr(module, "CONFIG"):
-        raise AttributeError(
-            f"Il file configs/{config_name}.py "
-            "non contiene la variabile CONFIG."
-        )
-
-    return module.CONFIG
+CONFIG_PATHS = [
+    "configs/etth1_24.yaml",
+    "configs/etth1_48.yaml",
+    "configs/etth1_96.yaml",
+    "configs/ettm1_24.yaml",
+    "configs/ettm1_48.yaml",
+    "configs/ettm1_96.yaml",
+]
 
 
-def main():
-    parser = argparse.ArgumentParser()
+def load_config(path: str) -> dict:
+    config_path = Path(path)
 
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help=(
-            "Nome del file di configurazione senza .py, "
-            "ad esempio ettm1_24."
-        ),
-    )
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config non trovato: {config_path}")
 
-    args = parser.parse_args()
-    config = load_config(args.config)
+    with config_path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if not isinstance(config, dict):
+        raise ValueError(f"Config YAML non valido: {config_path}")
+
+    return config
+
+
+def test_config(config_path: str):
+    config = load_config(config_path)
 
     train_dataset, train_loader = build_dataloader(
         config,
@@ -49,23 +50,34 @@ def main():
 
     x, y = next(iter(train_loader))
 
-    print("Configurazione caricata correttamente")
-    print(f"Dataset: {config['dataset_name']}")
-    print(f"CSV: {train_dataset.csv_path}")
-    print(f"Feature: {train_dataset.feature_names}")
-    print(f"Numero feature: {train_dataset.num_features}")
-    print(f"seq_len: {train_dataset.seq_len}")
-    print(f"pred_len: {train_dataset.pred_len}")
-    print()
+    expected_x = (
+        config["batch_size"],
+        config["seq_len"],
+        config["num_features"],
+    )
 
-    print(f"Finestre train: {len(train_dataset)}")
-    print(f"Finestre validation: {len(val_dataset)}")
-    print(f"Finestre test: {len(test_dataset)}")
-    print()
+    expected_y = (
+        config["batch_size"],
+        config["pred_len"],
+        config["num_features"],
+    )
 
-    print(f"Input [B, T, C]: {x.shape}")
-    print(f"Target [B, H, C]: {y.shape}")
+    assert tuple(x.shape) == expected_x, (
+        f"Shape input errata: {tuple(x.shape)}, attesa: {expected_x}"
+    )
+
+    assert tuple(y.shape) == expected_y, (
+        f"Shape target errata: {tuple(y.shape)}, attesa: {expected_y}"
+    )
+
+    print(
+        f"{config['dataset_name']} | "
+        f"pred_len={config['pred_len']} | "
+        f"x={tuple(x.shape)} | "
+        f"y={tuple(y.shape)}"
+    )
 
 
 if __name__ == "__main__":
-    main()
+    for config_path in CONFIG_PATHS:
+        test_config(config_path)
