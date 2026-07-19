@@ -1,0 +1,28 @@
+# unico file .yaml, cambia la pred_len usando nei file .py:
+# for pred_len in config["time"]["pred_lens"]:
+#  train_experiment(pred_len=pred_len)
+
+dataset:
+  name: ETTm1
+  csv_path: data/ETT-small/ETTm1.csv
+
+time:
+  seq_len: 96
+  pred_lens: [24, 48, 96]
+
+dataloader:
+  batch_size: 32
+  num_workers: 0
+  shuffle_train: true
+  drop_last_train: true
+
+model:
+  num_features: 7
+
+training:
+  epochs: 20
+  learning_rate: 0.001
+  weight_decay: 0.0
+
+reproducibility:
+  seed: 42
