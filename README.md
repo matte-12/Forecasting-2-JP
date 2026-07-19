@@ -6,16 +6,37 @@ https://drive.google.com/drive/folders/1pDeHKnxl-YRXAQDdhigfw5QzBBjZUEkb?usp=sha
 
 # come testare
 
+Per testare tutte le configurazioni:
+```bash
+python test_configs.py
+```
+
+Per testare una singola configurazione uno di questi: 
+```bash
 python test_configs.py --config etth1_24
 python test_configs.py --config etth1_48
 python test_configs.py --config etth1_96
 python test_configs.py --config ettm1_24
 python test_configs.py --config ettm1_48
 python test_configs.py --config ettm1_96
+```
 
+Per runnare un singolo addestramento:
+```bash
+python -m src.train --config <NOME_CONFIG> --model <NOME_MODELLO>
+```
+
+esempi:
+
+Addestrare `TimesNet` con l'orizzonte di previsione breve (`pred_len=24`):
+```bash
 python -m src.train --config etth1_24 --model TimesNet
-python -m src.train --config etth1_24 --model TimesNet
-python -m src.train --config ettm1_24 --model TimesNet
+```
+
+Addestrare `DLinear` con l'orizzonte di previsione lungo (`pred_len=96`):
+```bash
+python -m src.train --config etth1_96 --model DLinear
+```
 
 # da fare
 

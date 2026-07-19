@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 import yaml
@@ -79,5 +80,23 @@ def test_config(config_path: str):
 
 
 if __name__ == "__main__":
-    for config_path in CONFIG_PATHS:
+    parser = argparse.ArgumentParser(
+        description="Testa il caricamento dati per una o tutte le configurazioni."
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Nome del file di configurazione da testare (es. etth1_24). Se non fornito, testa tutti.",
+    )
+    args = parser.parse_args()
+
+    if args.config:
+        config_path = f"configs/{args.config}.yaml"
+        print(f"--- Testing single config: {config_path} ---")
         test_config(config_path)
+    else:
+        print("--- Testing all configs ---")
+        for config_path in CONFIG_PATHS:
+            test_config(config_path)
+
+    print("All tests passed.")
