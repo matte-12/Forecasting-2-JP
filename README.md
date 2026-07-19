@@ -4,21 +4,18 @@ link accesso dataset nel drive:
 https://drive.google.com/drive/folders/1pDeHKnxl-YRXAQDdhigfw5QzBBjZUEkb?usp=sharing
 
 
-# come testare tutti i config in configs folder
-`python test_configs.py`
+# come testare
 
-# per runnare TimesNet con i 6 orizzonti temporali:
+python test_configs.py --config etth1_24
+python test_configs.py --config etth1_48
+python test_configs.py --config etth1_96
+python test_configs.py --config ettm1_24
+python test_configs.py --config ettm1_48
+python test_configs.py --config ettm1_96
 
-`python -m src.train --config etth1_24 --model TimesNet`
-`python -m src.train --config etth1_48 --model TimesNet`
-`python -m src.train --config etth1_96 --model TimesNet`
-`python -m src.train --config ettm1_24 --model TimesNet`
-`python -m src.train --config ettm1_48 --model TimesNet`
-`python -m src.train --config ettm1_96 --model TimesNet`
-
-# per runnare DLinear / CausalTCN con i 6 orizzonti temporali:
-come sopra ma `--model DLinear` o `--model CausalTCN`
-
+python -m src.train --config etth1_24 --model TimesNet
+python -m src.train --config etth1_24 --model TimesNet
+python -m src.train --config ettm1_24 --model TimesNet
 
 # da fare
 

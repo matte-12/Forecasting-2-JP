@@ -51,32 +51,6 @@ class TimesBlock(nn.Module):
                 kernel_size=1,
             )
 
-    @staticmethod
-    def _pad_time_single(x_1d, target_length):
-        """
-        x_1d: [T, C]
-        """
-        time_steps, _ = x_1d.shape
-        if target_length <= time_steps:
-            return x_1d[:target_length, :]
-
-        pad_len = target_length - time_steps
-        pad = x_1d[-1:, :].repeat(pad_len, 1)
-        return torch.cat([x_1d, pad], dim=0)
-
-    @staticmethod
-    def _pad_time_batch(x, target_length):
-        """
-        x: [B, T, C]
-        """
-        batch_size, time_steps, _ = x.shape
-        if target_length <= time_steps:
-            return x[:, :target_length, :]
-
-        pad_len = target_length - time_steps
-        pad = x[:, -1:, :].repeat(1, pad_len, 1)
-        return torch.cat([x, pad], dim=1)
-
     def _reshape_2d_single(self, x_1d, period, freq):
         """
         x_1d: [T, C]
@@ -85,7 +59,11 @@ class TimesBlock(nn.Module):
         time_steps, channels = x_1d.shape
         length_needed = period * freq
 
-        x_1d = self._pad_time_single(x_1d, length_needed)
+        if length_needed > time_steps:
+            pad_len = length_needed - time_steps
+            x_1d = torch.cat([x_1d, x_1d[-pad_len:, :]], dim=0)
+        else:
+            x_1d = x_1d[:length_needed, :]
 
         x_2d = x_1d.reshape(period, freq, channels).permute(2, 0, 1).unsqueeze(0)
         out_2d = self.conv_2d(x_2d)
@@ -101,7 +79,11 @@ class TimesBlock(nn.Module):
         batch_size, time_steps, channels = x.shape
         length_needed = period * freq
 
-        x = self._pad_time_batch(x, length_needed)
+        if length_needed > time_steps:
+            pad_len = length_needed - time_steps
+            x = torch.cat([x, x[:, -pad_len:, :]], dim=1)
+        else:
+            x = x[:, :length_needed, :]
 
         x_2d = x.reshape(batch_size, period, freq, channels).permute(0, 3, 1, 2).contiguous()
         out_2d = self.conv_2d(x_2d)
@@ -141,6 +123,10 @@ class TimesBlock(nn.Module):
 
         # iterativo da evitare per full batch, ma qui con B=32 impatto trascurabile ora
         # poi in ablation togliamo e mettiamo [B, C, p, f] per avere padding e reshaping in un solo colpo dentro al tensore'?
+        for i in range(batch_size):
+            batch_outputs = []
+            batch_weights = torch.softmax(amplitudes[i, top_indices[i]], dim=0)
+
         for i in range(batch_size):
             batch_outputs = []
             batch_weights = torch.softmax(amplitudes[i, top_indices[i]], dim=0)

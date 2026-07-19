@@ -7,7 +7,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch import optim
-import yaml
 
 from src.data import build_dataloader
 from src.models_1d import DLinear, CausalTCN
@@ -54,22 +53,14 @@ class EarlyStopping:
         self.val_loss_min = val_loss
 
 def load_config(config_name):
-    """
-    Carica configs/<config_name>.yaml.
-    Accetta il nome senza estensione, ad esempio 'etth1_24'.
-    """
-    config_path = Path(__file__).resolve().parent.parent / "configs" / f"{config_name}.yaml"
+    module = importlib.import_module(f"configs.{config_name}")
 
-    if not config_path.exists():
-        raise FileNotFoundError(f"File config non trovato: {config_path}")
+    if not hasattr(module, "CONFIG"):
+        raise AttributeError(
+            f"Il file configs/{config_name}.py non contiene la variabile CONFIG."
+        )
 
-    with config_path.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
-
-    if not isinstance(config, dict):
-        raise ValueError(f"Config YAML non valido: {config_path}")
-
-    return config
+    return module.CONFIG
 
 """pianifico di usare sti comandi per testare i 3 modelli, limitiamo a 2 orizzonti?
 
@@ -90,7 +81,9 @@ def parse_args():
         "--config",
         type=str,
         required=True,
-        help="Nome del file di configurazione senza estensione, ad esempio etth1_24.",
+        help=(
+            "Nome del file di configurazione senza estensione, ad esempio etth1_24."
+        ),
     )
 
     parser.add_argument(
