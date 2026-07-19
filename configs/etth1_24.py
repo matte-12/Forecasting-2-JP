@@ -1,29 +1,21 @@
-# 24 ore di input, 24 ore di output
+# ETTh1, input fisso a 96, predizione a 24
 
 CONFIG = {
-    # Dataset
     "dataset_name": "ETTh1",
     "csv_path": "data/ETT-small/ETTh1.csv",
-
-    # Dimensioni temporali
-    # ETTh1 ha frequenza oraria: 1 timestep = 1 ora
-    "seq_len": 24,
+    "seq_len": 96,
     "pred_len": 24,
-
-    # Dataloader
     "batch_size": 32,
     "num_workers": 0,
     "shuffle_train": True,
     "drop_last_train": True,
-
-    # Modello
     "num_features": 7,
-
-    # Training
     "epochs": 20,
     "learning_rate": 1e-3,
     "weight_decay": 0.0,
-
-    # Riproducibilità
     "seed": 42,
+    "top_k": 3,
+    "use_fft": True,
+    "fixed_period": 24,
+    "use_inception": True,
 }

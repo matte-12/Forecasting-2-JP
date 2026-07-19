@@ -184,7 +184,7 @@ class TimeSeriesDataset(Dataset):
         if is_tensor:
             original_device = data.device
             original_dtype = data.dtype
-            data_numpy = data.detach().cpu().numpy()
+            data_numpy = data.detach().cpu().numpy()    # usa cuda o mps se disponibile
         else:
             data_numpy = np.asarray(data)
 
