@@ -1,3 +1,5 @@
+import argparse
+import importlib
 import time
 from pathlib import Path
 import numpy as np
@@ -7,7 +9,7 @@ import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
 
-from src.data import TimeSeriesDataset
+from src.data import TimeSeriesDataset, build_dataloader
 from src.models_1d import DLinear, CausalTCN
 from src.models_2d import TimesNet
 
@@ -48,38 +50,78 @@ class EarlyStopping:
         torch.save(model.state_dict(), self.path)
         self.val_loss_min = val_loss
 
+def load_config(config_name):
+    module = importlib.import_module(f"configs.{config_name}")
+
+    if not hasattr(module, "CONFIG"):
+        raise AttributeError(
+            f"Il file configs/{config_name}.py non contiene la variabile CONFIG."
+        )
+
+    return module.CONFIG
+
+"""pianifico di usare sti comandi per testare i 3 modelli, limitiamo a 2 orizzonti?
+
+orizzonte breve
+python -m src.train --config etth1_24 --model DLinear
+python -m src.train --config etth1_24 --model CausalTCN
+python -m src.train --config etth1_24 --model TimesNet
+
+orizzonte medio
+python -m src.train --config etth1_96 --model DLinear
+python -m src.train --config etth1_96 --model CausalTCN
+python -m src.train --config etth1_96 --model TimesNet
+"""
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help=(
+            "Nome del file di configurazione senza estensione, ad esempio etth1_24."
+        ),
+    )
+
+    parser.add_argument(
+        "--model",
+        type=str,
+        required=True,
+        choices=["DLinear", "CausalTCN", "TimesNet"],
+        help="Modello da usare.",
+    )
+
+    return parser.parse_args()
+
 def get_device():
     if torch.cuda.is_available():
         return torch.device("cuda")
     elif torch.backends.mps.is_available():
-        return torch.device("mps")
+        return torch.device("mps")  # metal, macos
     return torch.device("cpu")
 
 def main():
-    # questi parametri poi li mettiamo in un config.yaml
-    csv_name = "ETTh1.csv"
-    seq_len = 96
-    pred_len = 24
-    enc_in = 7
-    batch_size = 32
-    learning_rate = 1e-3
-    epochs = 20
-    model_name = "TimesNet" # set manuale: "DLinear", "CausalTCN", "TimesNet"
+    # parametri poi li mettiamo in un config.yaml ? attualmente gestiti con 6 comandi separati per isolare 
+    # i modelli e poter fare training separato
+    args = parse_args()
+    config = load_config(args.config)
+
+    seq_len = config["seq_len"]
+    pred_len = config["pred_len"]
+    enc_in = config["num_features"]
+    learning_rate = config["learning_rate"]
+    epochs = config["epochs"]
     
     project_root = Path(__file__).resolve().parent.parent
-    csv_path = project_root / "data" / "ETT-small" / csv_name
-    checkpoint_path = project_root / f"{model_name}_checkpoint.pth"
+    checkpoint_path = project_root / f"{args.model}_{config['dataset_name']}_H{config['pred_len']}_checkpoint.pth"
 
     device = get_device()
-    print(f"Avvio Training: Modello={model_name}, Dispositivo={device}")
+    print(f"Avvio Training: Modello={args.model}, Config={args.config}, Dispositivo={device}")
 
-    train_dataset = TimeSeriesDataset(str(csv_path), flag="train", seq_len=seq_len, pred_len=pred_len)
-    val_dataset = TimeSeriesDataset(str(csv_path), flag="val", seq_len=seq_len, pred_len=pred_len)
-    test_dataset = TimeSeriesDataset(str(csv_path), flag="test", seq_len=seq_len, pred_len=pred_len)
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=True)
+    train_dataset, train_loader = build_dataloader(config, flag="train")
+    val_dataset, val_loader = build_dataloader(config, flag="val")
+    test_dataset, test_loader = build_dataloader(config, flag="test")
 
     model_dict = {
         "DLinear": DLinear(seq_len, pred_len, enc_in),
@@ -87,7 +129,7 @@ def main():
         "TimesNet": TimesNet(seq_len, pred_len, enc_in, d_model=32, top_k=3)
     }
     
-    model = model_dict[model_name].to(device)
+    model = model_dict[args.model].to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
     early_stopping = EarlyStopping(patience=5, verbose=True, path=str(checkpoint_path))
@@ -144,7 +186,9 @@ def main():
             test_loss_mse.append(criterion(outputs, batch_y).item())
             test_loss_mae.append(mae_criterion(outputs, batch_y).item())
 
-    print(f"Risultati Test -> MSE: {np.average(test_loss_mse):.4f} | MAE: {np.average(test_loss_mae):.4f}")
-
+    print(
+        f"Risultati Test -> MSE: {np.average(test_loss_mse):.4f} | "
+        f"MAE: {np.average(test_loss_mae):.4f}"
+    )
 if __name__ == "__main__":
     main()
