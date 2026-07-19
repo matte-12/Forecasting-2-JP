@@ -1,10 +1,10 @@
-# ETTm1, input fisso a 96, predizione a 96
+# ETTm1, input fisso a 96, predizione a 48
 
 CONFIG = {
     "dataset_name": "ETTm1",
     "csv_path": "data/ETT-small/ETTm1.csv",
     "seq_len": 96,
-    "pred_len": 96,
+    "pred_len": 48,
     "batch_size": 32,
     "num_workers": 0,
     "shuffle_train": True,
