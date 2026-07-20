@@ -112,7 +112,7 @@ def get_device():
         return torch.device("mps")  # metal, macos
     return torch.device("cpu")
 
-# modifica per salvataggio .pth in root del progetto oppure su colab drive
+# modifica per salvataggio .pth in root del progetto di default oppure su colab drive
 # con l'istruzione:
 # import os
 # os.environ["EXPERIMENTS_DIR"] = "/content/drive/MyDrive/.../experiments"
