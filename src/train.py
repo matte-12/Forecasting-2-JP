@@ -112,7 +112,7 @@ def get_device():
         return torch.device("mps")  # metal, macos
     return torch.device("cpu")
 
-# modifica per salvataggio pth in root del progetto oppure su colab drive
+# modifica per salvataggio .pth in root del progetto oppure su colab drive
 # con l'istruzione:
 # import os
 # os.environ["EXPERIMENTS_DIR"] = "/content/drive/MyDrive/.../experiments"
@@ -121,7 +121,7 @@ def build_checkpoint_path(args, config):
     experiments_root = Path(
         os.environ.get(
             "EXPERIMENTS_DIR",
-            Path(__file__).resolve().parent.parent
+            Path(__file__).resolve().parent.parent / "experiments"
         )
     )
 
@@ -135,18 +135,43 @@ def build_checkpoint_path(args, config):
 
     suffix = "" if not suffix_parts else "_" + "_".join(suffix_parts)
 
-    checkpoint_name = (
-        f"{args.model}_{config['dataset_name']}_"
-        f"H{config['pred_len']}{suffix}_checkpoint.pth"
+    exp_name = (
+        f"{args.model}_"
+        f"{config['dataset_name']}_"
+        f"H{config['pred_len']}"
+        f"{suffix}"
     )
 
-    return experiments_root / checkpoint_name
+    exp_dir = experiments_root / exp_name
 
+    # crea la cartella esperimento
+    exp_dir.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    return exp_dir / "checkpoint.pth"
+
+# modificato il main per config save
 def main():
     # parametri poi li mettiamo in un config.yaml ? attualmente gestiti con 6 comandi separati per isolare 
     # i modelli e poter fare training separato
     args = parse_args()
     config = load_config(args.config)
+
+    # mod per salvare visualizzare file config usato
+
+    import shutil
+
+    shutil.copy(
+    Path(__file__).resolve().parent.parent /
+    "configs" /
+    f"{args.config}.yaml",
+
+    checkpoint_path.parent /
+    "config_used.yaml"
+    )
+    #
 
     seq_len = config["seq_len"]
     pred_len = config["pred_len"]
@@ -243,21 +268,94 @@ def main():
     model.load_state_dict(torch.load(str(checkpoint_path)))
     model.eval()
     
+    #aggiungo predictions per fare: 
+    # - confronto grafico previsione vs reale 
+    # - confronto tra modelli
+    # ese: predictions.csv
+    #timestamp,prediction,actual
+    #2025-01-01 00:00,101.2,100.8
+
+    predictions = []
+    targets = []
+
     test_loss_mse = []
     test_loss_mae = []
     mae_criterion = nn.L1Loss()
     
+    #modificato per predictions.csv
     with torch.no_grad():
         for batch_x, batch_y in test_loader:
+
             batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+
             outputs = model(batch_x)
-            
-            test_loss_mse.append(criterion(outputs, batch_y).item())
-            test_loss_mae.append(mae_criterion(outputs, batch_y).item())
+
+            test_loss_mse.append(
+                criterion(outputs, batch_y).item()
+            )
+
+            test_loss_mae.append(
+                mae_criterion(outputs, batch_y).item()
+            )
+
+            predictions.extend(
+                outputs.cpu().numpy().reshape(-1)
+            )
+
+            targets.extend(
+                batch_y.cpu().numpy().reshape(-1)
+            )
 
     print(
         f"Risultati Test -> MSE: {np.average(test_loss_mse):.4f} | "
         f"MAE: {np.average(test_loss_mae):.4f}"
     )
+
+    # salvataggio metriche in file json
+    import json
+
+    metrics = {
+        "model": args.model,
+        "config": args.config,
+        "dataset": config["dataset_name"],
+        "pred_len": config["pred_len"],
+        "MSE": float(np.average(test_loss_mse)),
+        "MAE": float(np.average(test_loss_mae))
+    }
+
+    with open(
+        checkpoint_path.parent / "metrics.json",
+        "w"
+    ) as f:
+        json.dump(
+            metrics,
+            f,
+            indent=4
+        )
+
+    print(
+        f"Metriche salvate in: {checkpoint_path.parent / 'metrics.json'}"
+    )
+
+    #salva prediction.csv
+
+    import pandas as pd
+
+    pred_df = pd.DataFrame(
+        {
+            "prediction": predictions,
+            "actual": targets
+        }
+    )
+
+    pred_df.to_csv(
+        checkpoint_path.parent / "predictions.csv",
+        index=False
+    )
+
+    print(
+        f"Predizioni salvate in: {checkpoint_path.parent / 'predictions.csv'}"
+    )
+
 if __name__ == "__main__":
     main()
