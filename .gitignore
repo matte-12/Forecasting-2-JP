@@ -2,11 +2,15 @@ data/
 results/
 checkpoints/
 logs/
+experiments/
 
 *.csv
 *.pt
 *.pth
 *.ckpt
+
+# Colab
+.ipynb_checkpoints/
 
 __pycache__/
 .ipynb_checkpoints/
