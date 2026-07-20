@@ -159,6 +159,11 @@ def main():
     args = parse_args()
     config = load_config(args.config)
 
+    # prima crea il path
+    checkpoint_path = build_checkpoint_path(args, config)
+
+    # poi usa checkpoint_path
+
     # mod per salvare visualizzare file config usato
 
     import shutil
@@ -189,7 +194,8 @@ def main():
 
     # modificato per salvare i checkpoint in una cartella dedicata, 
     # con possibilità di cambiare la root tramite variabile d'ambiente
-    checkpoint_path = build_checkpoint_path(args, config)
+    # checkpoint_path = build_checkpoint_path(args, config)
+    # sposato in alto
 
     device = get_device()
     print(
