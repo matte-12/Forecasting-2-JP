@@ -3,6 +3,8 @@ import importlib
 import time
 from pathlib import Path
 
+import os
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -110,7 +112,19 @@ def get_device():
         return torch.device("mps")  # metal, macos
     return torch.device("cpu")
 
-def build_checkpoint_path(project_root, args, config):
+# modifica per salvataggio pth in root del progetto oppure su colab drive
+# con l'istruzione:
+# import os
+# os.environ["EXPERIMENTS_DIR"] = "/content/drive/MyDrive/.../experiments"
+
+def build_checkpoint_path(args, config):
+    experiments_root = Path(
+        os.environ.get(
+            "EXPERIMENTS_DIR",
+            Path(__file__).resolve().parent.parent
+        )
+    )
+
     suffix_parts = []
 
     if not config.get("use_fft", True):
@@ -121,9 +135,12 @@ def build_checkpoint_path(project_root, args, config):
 
     suffix = "" if not suffix_parts else "_" + "_".join(suffix_parts)
 
-    return project_root / (
-        f"{args.model}_{config['dataset_name']}_H{config['pred_len']}{suffix}_checkpoint.pth"
+    checkpoint_name = (
+        f"{args.model}_{config['dataset_name']}_"
+        f"H{config['pred_len']}{suffix}_checkpoint.pth"
     )
+
+    return experiments_root / checkpoint_name
 
 def main():
     # parametri poi li mettiamo in un config.yaml ? attualmente gestiti con 6 comandi separati per isolare 
@@ -141,8 +158,13 @@ def main():
     fixed_period = config.get("fixed_period", 24)
     use_inception = config.get("use_inception", True)
 
-    project_root = Path(__file__).resolve().parent.parent
-    checkpoint_path = build_checkpoint_path(project_root, args, config)
+ 
+    # project_root = Path(__file__).resolve().parent.parent
+    # checkpoint_path = build_checkpoint_path(project_root, args, config)
+
+    # modificato per salvare i checkpoint in una cartella dedicata, 
+    # con possibilità di cambiare la root tramite variabile d'ambiente
+    checkpoint_path = build_checkpoint_path(args, config)
 
     device = get_device()
     print(
