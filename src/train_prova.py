@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import yaml
 from torch import optim
+import os
 
 from src.data import build_dataloader
 
@@ -302,26 +303,53 @@ def build_model(
 
 def create_experiment_directory(
     model_name: str,
-    config_name: str,
+    config_path: Path,
     config: dict,
+    model: nn.Module,
 ) -> Path:
-    project_root = (
-        Path(__file__).resolve().parent.parent
+    """
+    Crea una cartella distinta per:
+
+    - modello;
+    - file YAML;
+    - periodo fisso effettivamente usato.
+
+    Esempio:
+        experiments/
+        └── fixed_period_inception_etth1_24/
+            └── period_48/
+    """
+    project_root = Path(__file__).resolve().parent.parent
+
+    experiments_root = Path(
+        os.environ.get(
+            "EXPERIMENTS_DIR",
+            project_root / "experiments",
+        )
     )
 
-    experiment_name = (
-        f"{model_name}_"
-        f"{config['dataset_name']}_"
-        f"seq{config['seq_len']}_"
-        f"pred{config['pred_len']}_"
-        f"{config_name}"
+    # Nome del file YAML senza estensione.
+    # configs/etth1_24.yaml -> etth1_24
+    config_name = config_path.stem
+
+    base_experiment_name = (
+        f"{model_name}_{config_name}"
     )
 
-    experiment_directory = (
-        project_root
-        / "experiments"
-        / experiment_name
+    base_directory = (
+        experiments_root / base_experiment_name
     )
+
+    if model_name == "fixed_period_inception":
+        # Leggiamo il valore realmente utilizzato dalla rete.
+        period = int(model.period)
+
+        experiment_directory = (
+            base_directory / f"period_{period}"
+        )
+
+    else:
+        experiment_directory = base_directory
 
     experiment_directory.mkdir(
         parents=True,
@@ -502,12 +530,11 @@ def main():
 
     criterion = nn.MSELoss()
 
-    experiment_directory = (
-        create_experiment_directory(
-            model_name=args.model,
-            config_name=config_path.stem,
-            config=config,
-        )
+    experiment_directory = create_experiment_directory(
+        model_name=args.model,
+        config_path=config_path,
+        config=config,
+        model=model,
     )
 
     checkpoint_path = (
@@ -659,9 +686,8 @@ def main():
         "seq_len": config["seq_len"],
         "pred_len": config["pred_len"],
         "fixed_period": (
-            model.period
-            if args.model
-            == "fixed_period_inception"
+           int(model.period)
+            if args.model == "fixed_period_inception"
             else None
         ),
         "trainable_parameters": parameter_count,
