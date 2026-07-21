@@ -224,7 +224,7 @@ def build_model(
         )
 
     if model_name == "fixed_period_inception":
-        from src.models_2d.fixed_period_inception import (
+        from src.models.fixed_period_inception import (
             FixedPeriodInception2D,
         )
 
