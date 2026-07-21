@@ -193,7 +193,7 @@ def build_model(
     """
 
     if model_name == "timesnet":
-        from src.models_2d.models_2d import (
+        from src.models_2d import (
             TimesNet,
         )
 
@@ -231,6 +231,7 @@ def build_model(
         return FixedPeriodInception2D(
             seq_len=config["seq_len"],
             pred_len=config["pred_len"],
+            period=config["fixed_period"],
             num_features=config["num_features"],
             d_model=config.get(
                 "d_model",
@@ -254,7 +255,7 @@ def build_model(
 
     if model_name == "top_k_inception":
         try:
-            from src.models_2d.top_k_inception import (
+            from src.models.top_k_inception import (
                 TopKInception2D,
             )
         except ImportError as error:
@@ -537,7 +538,7 @@ def main():
     if args.model == "fixed_period_inception":
         print(
             "Periodo fixed usato dal modello: "
-            f"{config['pred_len']}"
+            f"{config['fixed_period']}"
         )
 
     print("=" * 60)
@@ -658,7 +659,7 @@ def main():
         "seq_len": config["seq_len"],
         "pred_len": config["pred_len"],
         "fixed_period": (
-            config["pred_len"]
+            model.period
             if args.model
             == "fixed_period_inception"
             else None
