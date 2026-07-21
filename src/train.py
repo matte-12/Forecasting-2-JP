@@ -13,7 +13,8 @@ import yaml
 
 from src.data import build_dataloader
 from src.models_1d import DLinear, CausalTCN
-from src.models_2d import TimesNet
+from models_2d import TimesNet
+from models.fixed_period_inception import FixedPeriodInception2D
 
 class EarlyStopping:
     """
