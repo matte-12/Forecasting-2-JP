@@ -1,31 +1,30 @@
 import argparse
+import importlib
+import inspect
 import json
+import os
 import random
-import shutil
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
 import yaml
 from torch import optim
-import os
 
 from src.data import build_dataloader
 
-"""
-comando colab per eseguire top k timesnet da 1 a 5 automatico: !python -m src.train_prova \
-    --config etth1 \
-    --model timesnet
-"""
 
-
+# ============================================================
+# ARGOMENTI
+# ============================================================
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Training delle reti 2D TimesNet-inspired."
+            "Training e confronto di modelli per forecasting."
         )
     )
 
@@ -34,8 +33,8 @@ def parse_args():
         type=str,
         required=True,
         help=(
-            "Nome del file YAML nella cartella configs "
-            "oppure percorso completo del file."
+            "Nome del file YAML dentro configs oppure "
+            "percorso completo del file."
         ),
     )
 
@@ -48,8 +47,20 @@ def parse_args():
             "fixed_period_inception",
             "timesnet_light_depthwise",
             "timesnet_light",
+            "models_1d",
         ],
-        help="Architettura 2D da allenare.",
+        help="Famiglia di modello da allenare.",
+    )
+
+    parser.add_argument(
+        "--model-class",
+        type=str,
+        default=None,
+        help=(
+            "Nome della classe Python da caricare. "
+            "È particolarmente utile per models_1d.py, "
+            "che può contenere più architetture."
+        ),
     )
 
     parser.add_argument(
@@ -63,35 +74,17 @@ def parse_args():
         ),
     )
 
-    parser.add_argument(
-        "--block",
-        type=str,
-        default="inception",
-        choices=["inception", "depthwise", "group", "residual"]
-    )
-
     return parser.parse_args()
 
+
+# ============================================================
+# CONFIGURAZIONE
+# ============================================================
 
 def resolve_config_path(
     config_argument: str,
 ) -> Path:
-    """
-    Accetta:
-
-        --config etth1_pred24
-
-    e cerca:
-
-        configs/etth1_pred24.yaml
-
-    Accetta anche:
-
-        --config configs/etth1_pred24.yaml
-    """
-    config_path = Path(
-        config_argument
-    ).expanduser()
+    config_path = Path(config_argument).expanduser()
 
     project_root = (
         Path(__file__).resolve().parent.parent
@@ -112,7 +105,7 @@ def resolve_config_path(
 
     if not config_path.exists():
         raise FileNotFoundError(
-            f"Configurazione non trovata: "
+            "Configurazione non trovata: "
             f"{config_path}"
         )
 
@@ -134,7 +127,7 @@ def load_config(
 
     if not isinstance(config, dict):
         raise ValueError(
-            f"Configurazione YAML non valida: "
+            "Configurazione YAML non valida: "
             f"{config_path}"
         )
 
@@ -184,6 +177,10 @@ def validate_config(
             )
 
 
+# ============================================================
+# SEED E DEVICE
+# ============================================================
+
 def set_seed(
     seed: int,
 ) -> None:
@@ -207,13 +204,430 @@ def get_device() -> torch.device:
 
     return torch.device("cpu")
 
-def get_model_fixed_period(
-    model: nn.Module,
+
+def synchronize_device(
+    device: torch.device,
+) -> None:
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+    elif device.type == "mps":
+        torch.mps.synchronize()
+
+
+# ============================================================
+# CARICAMENTO DINAMICO DEI MODELLI
+# ============================================================
+
+def find_model_class(
+    module_path: str,
+    requested_class: Optional[str] = None,
+    preferred_classes: Optional[list[str]] = None,
 ):
     """
-    Restituisce il periodo effettivamente usato dal modello,
-    indipendentemente dalla sua implementazione interna.
+    Cerca una classe nn.Module dentro un modulo.
+
+    Ordine:
+    1. classe richiesta con --model-class;
+    2. nomi preferiti;
+    3. unica classe nn.Module definita nel modulo.
     """
+    module = importlib.import_module(
+        module_path
+    )
+
+    if requested_class is not None:
+        if not hasattr(module, requested_class):
+            available = [
+                name
+                for name, obj in inspect.getmembers(
+                    module,
+                    inspect.isclass,
+                )
+                if (
+                    issubclass(obj, nn.Module)
+                    and obj is not nn.Module
+                    and obj.__module__ == module.__name__
+                )
+            ]
+
+            raise AttributeError(
+                f"La classe '{requested_class}' non è "
+                f"presente in {module_path}. "
+                f"Classi disponibili: {available}"
+            )
+
+        model_class = getattr(
+            module,
+            requested_class,
+        )
+
+        if not issubclass(model_class, nn.Module):
+            raise TypeError(
+                f"{requested_class} non è una nn.Module."
+            )
+
+        return model_class
+
+    for class_name in preferred_classes or []:
+        if hasattr(module, class_name):
+            model_class = getattr(
+                module,
+                class_name,
+            )
+
+            if (
+                inspect.isclass(model_class)
+                and issubclass(model_class, nn.Module)
+            ):
+                return model_class
+
+    available_classes = [
+        obj
+        for _, obj in inspect.getmembers(
+            module,
+            inspect.isclass,
+        )
+        if (
+            issubclass(obj, nn.Module)
+            and obj is not nn.Module
+            and obj.__module__ == module.__name__
+        )
+    ]
+
+    if len(available_classes) == 1:
+        return available_classes[0]
+
+    available_names = [
+        cls.__name__
+        for cls in available_classes
+    ]
+
+    raise ValueError(
+        f"Non è possibile scegliere automaticamente una "
+        f"classe da {module_path}. "
+        f"Classi disponibili: {available_names}. "
+        f"Usa --model-class NOME_CLASSE."
+    )
+
+
+def instantiate_from_signature(
+    model_class,
+    config: dict,
+    top_k: Optional[int] = None,
+) -> nn.Module:
+    """
+    Costruisce una classe usando solo gli argomenti accettati
+    dal suo __init__.
+
+    Include alias comuni usati dai modelli 1D e 2D.
+    """
+    effective_top_k = (
+        int(top_k)
+        if top_k is not None
+        else int(config.get("top_k", 3))
+    )
+
+    num_features = int(
+        config["num_features"]
+    )
+
+    seq_len = int(config["seq_len"])
+    pred_len = int(config["pred_len"])
+
+    candidate_kwargs = {
+        # Lunghezza temporale
+        "seq_len": seq_len,
+        "input_len": seq_len,
+        "context_len": seq_len,
+        "lookback": seq_len,
+
+        # Orizzonte
+        "pred_len": pred_len,
+        "prediction_len": pred_len,
+        "horizon": pred_len,
+        "forecast_horizon": pred_len,
+
+        # Numero di feature
+        "enc_in": num_features,
+        "num_features": num_features,
+        "input_size": num_features,
+        "input_dim": num_features,
+        "n_features": num_features,
+        "c_in": num_features,
+        "in_channels": num_features,
+
+        # Output multivariato
+        "output_size": num_features,
+        "output_dim": num_features,
+        "c_out": num_features,
+        "out_channels": num_features,
+
+        # Dimensioni interne
+        "d_model": int(
+            config.get("d_model", 32)
+        ),
+        "d_ff": int(
+            config.get("d_ff", 64)
+        ),
+        "hidden_size": int(
+            config.get(
+                "hidden_size",
+                config.get("d_model", 32),
+            )
+        ),
+        "hidden_dim": int(
+            config.get(
+                "hidden_dim",
+                config.get("d_model", 32),
+            )
+        ),
+        "num_layers": int(
+            config.get("num_layers", 1)
+        ),
+
+        # Periodicità
+        "fixed_period": int(
+            config.get("fixed_period", 24)
+        ),
+        "period": int(
+            config.get("fixed_period", 24)
+        ),
+        "top_k": effective_top_k,
+
+        # Regolarizzazione
+        "dropout": float(
+            config.get("dropout", 0.1)
+        ),
+
+        # Convoluzioni
+        "kernel_size": int(
+            config.get("kernel_size", 3)
+        ),
+        "kernel_sizes": tuple(
+            config.get(
+                "kernel_sizes",
+                [1, 3, 5],
+            )
+        ),
+
+        # Opzioni TimesNet
+        "use_fft": bool(
+            config.get("use_fft", True)
+        ),
+        "use_inception": bool(
+            config.get("use_inception", True)
+        ),
+    }
+
+    signature = inspect.signature(
+        model_class.__init__
+    )
+
+    accepted_kwargs = {}
+
+    accepts_kwargs = any(
+        parameter.kind
+        == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+
+    for name, value in candidate_kwargs.items():
+        if accepts_kwargs or name in signature.parameters:
+            accepted_kwargs[name] = value
+
+    missing_required = []
+
+    for name, parameter in signature.parameters.items():
+        if name == "self":
+            continue
+
+        if (
+            parameter.default
+            is inspect.Parameter.empty
+            and parameter.kind
+            not in {
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            }
+            and name not in accepted_kwargs
+        ):
+            missing_required.append(name)
+
+    if missing_required:
+        raise TypeError(
+            f"Impossibile costruire "
+            f"{model_class.__name__}. "
+            f"Argomenti obbligatori non riconosciuti: "
+            f"{missing_required}. "
+            f"Firma: {signature}"
+        )
+
+    print(
+        f"Classe selezionata: "
+        f"{model_class.__module__}."
+        f"{model_class.__name__}"
+    )
+
+    print(
+        "Argomenti modello:",
+        accepted_kwargs,
+    )
+
+    return model_class(
+        **accepted_kwargs
+    )
+
+
+def build_model(
+    model_name: str,
+    config: dict,
+    top_k: Optional[int] = None,
+    requested_class: Optional[str] = None,
+) -> nn.Module:
+
+    # --------------------------------------------------------
+    # TimesNet originale: src/models_2d.py
+    # --------------------------------------------------------
+    if model_name == "timesnet":
+        from src.models_2d import TimesNet
+
+        effective_top_k = (
+            int(top_k)
+            if top_k is not None
+            else int(config.get("top_k", 3))
+        )
+
+        return TimesNet(
+            seq_len=int(config["seq_len"]),
+            pred_len=int(config["pred_len"]),
+            enc_in=int(config["num_features"]),
+            d_model=int(
+                config.get("d_model", 32)
+            ),
+            top_k=effective_top_k,
+            use_fft=bool(
+                config.get("use_fft", True)
+            ),
+            fixed_period=int(
+                config.get("fixed_period", 24)
+            ),
+            use_inception=bool(
+                config.get(
+                    "use_inception",
+                    True,
+                )
+            ),
+        )
+
+    # --------------------------------------------------------
+    # Fixed-period Inception:
+    # src/models/fixed_period_inception.py
+    # --------------------------------------------------------
+    if model_name == "fixed_period_inception":
+        from src.models.fixed_period_inception import (
+            FixedPeriodInception2D,
+        )
+
+        return FixedPeriodInception2D(
+            seq_len=int(config["seq_len"]),
+            pred_len=int(config["pred_len"]),
+            num_features=int(
+                config["num_features"]
+            ),
+            period=int(
+                config.get("fixed_period", 24)
+            ),
+            d_model=int(
+                config.get("d_model", 32)
+            ),
+            d_ff=int(
+                config.get("d_ff", 64)
+            ),
+            kernel_sizes=tuple(
+                config.get(
+                    "kernel_sizes",
+                    [1, 3, 5],
+                )
+            ),
+            dropout=float(
+                config.get("dropout", 0.1)
+            ),
+        )
+
+    # --------------------------------------------------------
+    # Light Depthwise:
+    # src/models/models_light_depthwise.py
+    # --------------------------------------------------------
+    if model_name == "timesnet_light_depthwise":
+        model_class = find_model_class(
+            module_path=(
+                "src.models.models_light_depthwise"
+            ),
+            requested_class=requested_class,
+            preferred_classes=[
+                "LightTimesNetDepthwise",
+                "LightTimesNet",
+                "TimesNetLightDepthwise",
+            ],
+        )
+
+        return instantiate_from_signature(
+            model_class=model_class,
+            config=config,
+            top_k=top_k,
+        )
+
+    # --------------------------------------------------------
+    # TimesNet Light:
+    # src/models_light.py
+    # --------------------------------------------------------
+    if model_name == "timesnet_light":
+        model_class = find_model_class(
+            module_path="src.models_light",
+            requested_class=requested_class,
+            preferred_classes=[
+                "LightTimesNet",
+                "TimesNetLight",
+                "LightTimesNetModel",
+            ],
+        )
+
+        return instantiate_from_signature(
+            model_class=model_class,
+            config=config,
+            top_k=top_k,
+        )
+
+    # --------------------------------------------------------
+    # Modelli 1D:
+    # src/models_1d.py
+    # --------------------------------------------------------
+    if model_name == "models_1d":
+        model_class = find_model_class(
+            module_path="src.models_1d",
+            requested_class=requested_class,
+            preferred_classes=[],
+        )
+
+        return instantiate_from_signature(
+            model_class=model_class,
+            config=config,
+            top_k=top_k,
+        )
+
+    raise ValueError(
+        f"Modello non riconosciuto: {model_name}"
+    )
+
+
+# ============================================================
+# INFORMAZIONI SUL MODELLO
+# ============================================================
+
+def get_model_fixed_period(
+    model: nn.Module,
+) -> Optional[int]:
     if hasattr(model, "period"):
         return int(model.period)
 
@@ -222,154 +636,53 @@ def get_model_fixed_period(
 
     if (
         hasattr(model, "times_block")
-        and hasattr(model.times_block, "fixed_period")
+        and hasattr(
+            model.times_block,
+            "fixed_period",
+        )
     ):
-        return int(model.times_block.fixed_period)
+        return int(
+            model.times_block.fixed_period
+        )
 
     return None
 
-def build_model(
+
+def get_experiment_model_name(
     model_name: str,
-    config: dict,
-    top_k: int|None = None,
-) -> nn.Module:
-    """
-    Factory dedicata ai modelli TimesNet-inspired.
-
-    Gli import sono interni ai singoli rami. In questo modo
-    la futura top_k_inception.py non è obbligatoria finché
-    non viene selezionata da riga di comando.
-    """
-
-    if model_name == "timesnet":
-        from src.models_2d import (
-            TimesNet,
-        )
-        effective_top_k = (
-            top_k
-            if top_k is not None
-            else config.get("top_k", 3)
+    requested_class: Optional[str],
+) -> str:
+    if (
+        model_name == "models_1d"
+        and requested_class is not None
+    ):
+        safe_class_name = (
+            requested_class
+            .replace(" ", "_")
+            .lower()
         )
 
-        return TimesNet(
-            seq_len=config["seq_len"],
-            pred_len=config["pred_len"],
-            enc_in=config["num_features"],
-            d_model=config.get("d_model", 32),
-            top_k=effective_top_k,
-            use_fft=config.get("use_fft", True),
-            fixed_period=config.get("fixed_period", 24),
-            use_inception=config.get("use_inception", True),
+        return (
+            f"{model_name}_{safe_class_name}"
         )
 
-    if model_name == "fixed_period_inception":
-        from src.models.fixed_period_inception import (
-            FixedPeriodInception2D,
-        )
+    return model_name
 
-        return FixedPeriodInception2D(
-            seq_len=config["seq_len"],
-            pred_len=config["pred_len"],
-            period=config["fixed_period"],
-            num_features=config["num_features"],
-            d_model=config.get(
-                "d_model",
-                32,
-            ),
-            d_ff=config.get(
-                "d_ff",
-                64,
-            ),
-            kernel_sizes=tuple(
-                config.get(
-                    "kernel_sizes",
-                    [1, 3, 5],
-                )
-            ),
-            dropout=config.get(
-                "dropout",
-                0.1,
-            ),
-        )
 
-    if model_name == "top_k_inception":
-        try:
-            from src.models.top_k_inception import (
-                TopKInception2D,
-            )
-        except ImportError as error:
-            raise ImportError(
-                "Il modello top_k_inception è stato "
-                "selezionato, ma il file "
-                "'src/models_2d/top_k_inception.py' "
-                "o la classe 'TopKInception2D' "
-                "non sono ancora disponibili."
-            ) from error
-
-        return TopKInception2D(
-            seq_len=config["seq_len"],
-            pred_len=config["pred_len"],
-            num_features=config["num_features"],
-            top_k=config.get(
-                "top_k",
-                3,
-            ),
-            d_model=config.get(
-                "d_model",
-                32,
-            ),
-            d_ff=config.get(
-                "d_ff",
-                64,
-            ),
-            kernel_sizes=tuple(
-                config.get(
-                    "kernel_sizes",
-                    [1, 3, 5],
-                )
-            ),
-            dropout=config.get(
-                "dropout",
-                0.1,
-            ),
-        )
-
-    if model_name == "timesnet_light_depthwise":
-        from models.models_light_depthwise import (
-            LightTimesNet,
-        )
-
-        return LightTimesNet(
-            seq_len=config["seq_len"],
-            pred_len=config["pred_len"],
-            num_features=config["num_features"],
-            d_model=config.get("d_model", 32),
-            d_ff=config.get("d_ff", 64),
-            top_k=config.get("top_k", 3),
-            dropout=config.get("dropout", 0.1),
-        )
-
-    raise ValueError(
-        f"Modello non riconosciuto: {model_name}"
-    )
-
+# ============================================================
+# CARTELLE
+# ============================================================
 
 def create_experiment_directory(
     model_name: str,
     config_path: Path,
-    model: nn.Module | None = None,
-    top_k: int | None = None,
+    model: nn.Module,
+    top_k: Optional[int] = None,
+    requested_class: Optional[str] = None,
 ) -> Path:
-    """
-    Crea cartelle diverse in base al tipo di esperimento.
-
-    TimesNet:
-        experiments/timesnet_etth1_24/top_k_1/
-
-    Modelli fixed-period:
-        experiments/fixed_period_inception_etth1_24/period_24/
-    """
-    project_root = Path(__file__).resolve().parent.parent
+    project_root = (
+        Path(__file__).resolve().parent.parent
+    )
 
     experiments_root = Path(
         os.environ.get(
@@ -378,17 +691,24 @@ def create_experiment_directory(
         )
     )
 
-    config_name = config_path.stem
+    experiment_model_name = (
+        get_experiment_model_name(
+            model_name=model_name,
+            requested_class=requested_class,
+        )
+    )
 
     base_directory = (
         experiments_root
-        / f"{model_name}_{config_name}"
+        / f"{experiment_model_name}_"
+          f"{config_path.stem}"
     )
 
     if model_name == "timesnet":
         if top_k is None:
             raise ValueError(
-                "top_k deve essere specificato per TimesNet."
+                "top_k deve essere specificato "
+                "per TimesNet."
             )
 
         experiment_directory = (
@@ -397,10 +717,8 @@ def create_experiment_directory(
         )
 
     else:
-        fixed_period = (
-            get_model_fixed_period(model)
-            if model is not None
-            else None
+        fixed_period = get_model_fixed_period(
+            model
         )
 
         if fixed_period is not None:
@@ -409,7 +727,9 @@ def create_experiment_directory(
                 / f"period_{fixed_period}"
             )
         else:
-            experiment_directory = base_directory
+            experiment_directory = (
+                base_directory
+            )
 
     experiment_directory.mkdir(
         parents=True,
@@ -419,6 +739,10 @@ def create_experiment_directory(
     return experiment_directory
 
 
+# ============================================================
+# TRAINING E VALUTAZIONE
+# ============================================================
+
 def run_epoch(
     model: nn.Module,
     dataloader,
@@ -426,10 +750,6 @@ def run_epoch(
     device: torch.device,
     optimizer=None,
 ) -> float:
-    """
-    Se optimizer è presente esegue training.
-    Se optimizer è None esegue valutazione.
-    """
     is_training = optimizer is not None
 
     if is_training:
@@ -459,7 +779,9 @@ def run_epoch(
             )
 
             if is_training:
-                optimizer.zero_grad()
+                optimizer.zero_grad(
+                    set_to_none=True
+                )
 
             predictions = model(batch_x)
 
@@ -467,7 +789,9 @@ def run_epoch(
                 raise RuntimeError(
                     "Shape non compatibili: "
                     f"prediction={predictions.shape}, "
-                    f"target={batch_y.shape}."
+                    f"target={batch_y.shape}. "
+                    "Il modello deve restituire "
+                    "[B, pred_len, num_features]."
                 )
 
             loss = criterion(
@@ -477,6 +801,19 @@ def run_epoch(
 
             if is_training:
                 loss.backward()
+
+                gradient_clip = getattr(
+                    model,
+                    "gradient_clip",
+                    None,
+                )
+
+                if gradient_clip is not None:
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(),
+                        gradient_clip,
+                    )
+
                 optimizer.step()
 
             batch_size = batch_x.size(0)
@@ -520,18 +857,21 @@ def evaluate_test(
 
             predictions = model(batch_x)
 
+            if predictions.shape != batch_y.shape:
+                raise RuntimeError(
+                    "Shape test non compatibili: "
+                    f"prediction={predictions.shape}, "
+                    f"target={batch_y.shape}."
+                )
+
+            error = predictions - batch_y
+
             squared_error_sum += (
-                (predictions - batch_y)
-                .pow(2)
-                .sum()
-                .item()
+                error.pow(2).sum().item()
             )
 
             absolute_error_sum += (
-                (predictions - batch_y)
-                .abs()
-                .sum()
-                .item()
+                error.abs().sum().item()
             )
 
             element_count += batch_y.numel()
@@ -546,19 +886,6 @@ def evaluate_test(
 
     return mse, mae
 
-def synchronize_device(device: torch.device) -> None:
-    """
-    Attende il completamento delle operazioni asincrone.
-
-    È necessario soprattutto su CUDA per misurare correttamente
-    i tempi di esecuzione.
-    """
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
-
-    elif device.type == "mps":
-        torch.mps.synchronize()
-
 
 def measure_inference_time(
     model: nn.Module,
@@ -567,33 +894,14 @@ def measure_inference_time(
     warmup_batches: int = 5,
     max_batches: int = 30,
 ) -> dict:
-    """
-    Misura il tempo di inferenza del modello.
-
-    Restituisce:
-        - millisecondi medi per batch;
-        - millisecondi medi per campione;
-        - campioni elaborati al secondo.
-
-    Il warm-up evita di includere nel risultato inizializzazioni
-    CUDA e allocazioni eseguite soltanto al primo forward.
-    """
     model.eval()
 
-    batches = list(dataloader)
+    warmup_count = 0
 
-    if not batches:
-        raise RuntimeError(
-            "Impossibile misurare l'inferenza: "
-            "il DataLoader è vuoto."
-        )
-
-    # Warm-up
     with torch.no_grad():
-        for index in range(
-            min(warmup_batches, len(batches))
-        ):
-            batch_x, _ = batches[index]
+        for batch_x, _ in dataloader:
+            if warmup_count >= warmup_batches:
+                break
 
             batch_x = batch_x.to(
                 device,
@@ -601,21 +909,19 @@ def measure_inference_time(
             )
 
             _ = model(batch_x)
+            warmup_count += 1
 
     synchronize_device(device)
 
-    measured_batches = min(
-        max_batches,
-        len(batches),
-    )
-
+    measured_batches = 0
     total_samples = 0
 
     start_time = time.perf_counter()
 
     with torch.no_grad():
-        for index in range(measured_batches):
-            batch_x, _ = batches[index]
+        for batch_x, _ in dataloader:
+            if measured_batches >= max_batches:
+                break
 
             batch_x = batch_x.to(
                 device,
@@ -624,6 +930,7 @@ def measure_inference_time(
 
             _ = model(batch_x)
 
+            measured_batches += 1
             total_samples += batch_x.size(0)
 
     synchronize_device(device)
@@ -656,33 +963,32 @@ def measure_inference_time(
         ),
     }
 
+
+# ============================================================
+# SINGOLO ESPERIMENTO
+# ============================================================
+
 def run_experiment(
     args,
     config: dict,
     config_path: Path,
-    top_k: int,
+    top_k: Optional[int] = None,
 ) -> dict:
-    """
-    Allena e valuta una singola configurazione TimesNet
-    con uno specifico valore di top_k.
-    """
-
-    # Fondamentale: stesso seed per ogni k.
-    set_seed(config["seed"])
+    set_seed(int(config["seed"]))
 
     device = get_device()
 
-    train_dataset, train_loader = build_dataloader(
+    _, train_loader = build_dataloader(
         config,
         flag="train",
     )
 
-    val_dataset, val_loader = build_dataloader(
+    _, val_loader = build_dataloader(
         config,
         flag="val",
     )
 
-    test_dataset, test_loader = build_dataloader(
+    _, test_loader = build_dataloader(
         config,
         flag="test",
     )
@@ -691,35 +997,64 @@ def run_experiment(
         model_name=args.model,
         config=config,
         top_k=top_k,
+        requested_class=args.model_class,
     ).to(device)
 
     optimizer = optim.Adam(
         model.parameters(),
-        lr=config["learning_rate"],
-        weight_decay=config.get(
-            "weight_decay",
-            0.0,
+        lr=float(config["learning_rate"]),
+        weight_decay=float(
+            config.get("weight_decay", 0.0)
         ),
     )
 
     criterion = nn.MSELoss()
 
-    experiment_directory = create_experiment_directory(
-        model_name=args.model,
-        config_path=config_path,
-        top_k=top_k,
-         model=model,
+    experiment_directory = (
+        create_experiment_directory(
+            model_name=args.model,
+            config_path=config_path,
+            model=model,
+            top_k=top_k,
+            requested_class=args.model_class,
+        )
     )
 
     checkpoint_path = (
-        experiment_directory / "best_model.pth"
+        experiment_directory
+        / "best_model.pth"
+    )
+
+    parameter_count = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    )
+
+    effective_period = get_model_fixed_period(
+        model
     )
 
     config_used = dict(config)
-    config_used["top_k"] = int(top_k)
+
+    if top_k is not None:
+        config_used["top_k"] = int(top_k)
+
+    if effective_period is not None:
+        config_used["fixed_period"] = int(
+            effective_period
+        )
+
+    config_used["selected_model"] = args.model
+
+    if args.model_class is not None:
+        config_used["selected_model_class"] = (
+            args.model_class
+        )
 
     with (
-        experiment_directory / "config_used.yaml"
+        experiment_directory
+        / "config_used.yaml"
     ).open(
         "w",
         encoding="utf-8",
@@ -730,25 +1065,39 @@ def run_experiment(
             sort_keys=False,
         )
 
-    parameter_count = sum(
-        parameter.numel()
-        for parameter in model.parameters()
-        if parameter.requires_grad
-    )
+    print("\n" + "=" * 72)
+    print(f"Modello: {args.model}")
 
-    print("\n" + "=" * 70)
-    print(f"Modello: TimesNet")
-    print(f"Dataset: {config['dataset_name']}")
+    if args.model_class is not None:
+        print(
+            f"Classe: {args.model_class}"
+        )
+
+    print(
+        f"Dataset: {config['dataset_name']}"
+    )
     print(f"seq_len: {config['seq_len']}")
     print(f"pred_len: {config['pred_len']}")
-    print(f"top_k: {top_k}")
+
+    if top_k is not None:
+        print(f"top_k: {top_k}")
+
+    if effective_period is not None:
+        print(
+            f"fixed_period: {effective_period}"
+        )
+
     print(f"Device: {device}")
     print(f"Parametri: {parameter_count:,}")
     print(f"Output: {experiment_directory}")
-    print("=" * 70)
+    print("=" * 72)
 
-    # Verifica iniziale delle shape.
-    sample_x, sample_y = next(iter(train_loader))
+    # Controllo shape prima del training
+    sample_x, sample_y = next(
+        iter(train_loader)
+    )
+
+    model.eval()
 
     with torch.no_grad():
         sample_prediction = model(
@@ -757,13 +1106,19 @@ def run_experiment(
 
     if sample_prediction.shape != sample_y.shape:
         raise RuntimeError(
-            "Shape non compatibili: "
+            "Shape non compatibili prima del training: "
             f"prediction={sample_prediction.shape}, "
-            f"target={sample_y.shape}"
+            f"target={sample_y.shape}. "
+            "Il modello deve restituire "
+            "[B, pred_len, num_features]."
         )
 
     best_validation_loss = float("inf")
-    patience = config.get("patience", 5)
+
+    patience = int(
+        config.get("patience", 5)
+    )
+
     epochs_without_improvement = 0
 
     history = {
@@ -773,14 +1128,17 @@ def run_experiment(
     }
 
     if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.reset_peak_memory_stats(
+            device
+        )
 
     synchronize_device(device)
+
     training_start = time.perf_counter()
 
     for epoch in range(
         1,
-        config["epochs"] + 1,
+        int(config["epochs"]) + 1,
     ):
         synchronize_device(device)
         epoch_start = time.perf_counter()
@@ -804,7 +1162,8 @@ def run_experiment(
         synchronize_device(device)
 
         epoch_time = (
-            time.perf_counter() - epoch_start
+            time.perf_counter()
+            - epoch_start
         )
 
         history["train_mse"].append(
@@ -815,47 +1174,75 @@ def run_experiment(
             float(val_mse)
         )
 
-        history["epoch_time_seconds"].append(
+        history[
+            "epoch_time_seconds"
+        ].append(
             float(epoch_time)
         )
 
+        experiment_label = (
+            f"top_k={top_k}"
+            if top_k is not None
+            else args.model
+        )
+
         print(
-            f"k={top_k} | "
-            f"Epoch {epoch:03d}/{config['epochs']} | "
+            f"{experiment_label} | "
+            f"Epoch {epoch:03d}/"
+            f"{config['epochs']} | "
             f"time={epoch_time:.2f}s | "
             f"train MSE={train_mse:.6f} | "
             f"val MSE={val_mse:.6f}"
         )
 
         if val_mse < best_validation_loss:
-            best_validation_loss = val_mse
+            best_validation_loss = float(
+                val_mse
+            )
+
             epochs_without_improvement = 0
 
             torch.save(
                 model.state_dict(),
                 checkpoint_path,
             )
+
         else:
             epochs_without_improvement += 1
 
-            if epochs_without_improvement >= patience:
-                print(
-                    f"Early stopping per top_k={top_k}."
-                )
+            print(
+                "Nessun miglioramento: "
+                f"{epochs_without_improvement}/"
+                f"{patience}"
+            )
+
+            if (
+                epochs_without_improvement
+                >= patience
+            ):
+                print("Early stopping.")
                 break
 
     synchronize_device(device)
 
     total_training_time = (
-        time.perf_counter() - training_start
+        time.perf_counter()
+        - training_start
     )
 
     completed_epochs = len(
         history["epoch_time_seconds"]
     )
 
+    if completed_epochs == 0:
+        raise RuntimeError(
+            "Nessuna epoca completata."
+        )
+
     average_epoch_time = float(
-        np.mean(history["epoch_time_seconds"])
+        np.mean(
+            history["epoch_time_seconds"]
+        )
     )
 
     model.load_state_dict(
@@ -875,13 +1262,17 @@ def run_experiment(
         model=model,
         dataloader=test_loader,
         device=device,
-        warmup_batches=config.get(
-            "inference_warmup_batches",
-            5,
+        warmup_batches=int(
+            config.get(
+                "inference_warmup_batches",
+                5,
+            )
         ),
-        max_batches=config.get(
-            "inference_measure_batches",
-            30,
+        max_batches=int(
+            config.get(
+                "inference_measure_batches",
+                30,
+            )
         ),
     )
 
@@ -892,12 +1283,16 @@ def run_experiment(
 
     if device.type == "cuda":
         peak_gpu_memory_mb = (
-            torch.cuda.max_memory_allocated(device)
+            torch.cuda.max_memory_allocated(
+                device
+            )
             / 1024**2
         )
 
         peak_gpu_reserved_mb = (
-            torch.cuda.max_memory_reserved(device)
+            torch.cuda.max_memory_reserved(
+                device
+            )
             / 1024**2
         )
     else:
@@ -905,24 +1300,54 @@ def run_experiment(
         peak_gpu_reserved_mb = None
 
     metrics = {
-        "model": "timesnet",
+        "model": args.model,
+        "model_class": (
+            model.__class__.__name__
+        ),
         "config": config_path.stem,
         "dataset": config["dataset_name"],
+
         "seq_len": int(config["seq_len"]),
         "pred_len": int(config["pred_len"]),
-        "batch_size": int(config["batch_size"]),
-        "top_k": int(top_k),
-        "use_fft": bool(
-            config.get("use_fft", True)
+        "batch_size": int(
+            config["batch_size"]
         ),
-        "use_inception": bool(
-            config.get("use_inception", True)
+
+        "top_k": (
+            int(top_k)
+            if top_k is not None
+            else None
         ),
+
+        "fixed_period": (
+            int(effective_period)
+            if effective_period is not None
+            else None
+        ),
+
+        "use_fft": (
+            bool(config.get("use_fft", True))
+            if args.model == "timesnet"
+            else None
+        ),
+
+        "use_inception": (
+            bool(
+                config.get(
+                    "use_inception",
+                    True,
+                )
+            )
+            if args.model == "timesnet"
+            else None
+        ),
+
         "device": str(device),
 
         "trainable_parameters": int(
             parameter_count
         ),
+
         "checkpoint_size_mb": float(
             checkpoint_size_mb
         ),
@@ -930,12 +1355,15 @@ def run_experiment(
         "completed_epochs": int(
             completed_epochs
         ),
+
         "best_validation_mse": float(
             best_validation_loss
         ),
+
         "total_training_time_seconds": float(
             total_training_time
         ),
+
         "average_epoch_time_seconds": float(
             average_epoch_time
         ),
@@ -948,14 +1376,28 @@ def run_experiment(
                 "inference_ms_per_batch"
             ]
         ),
+
         "inference_ms_per_sample": float(
             inference_stats[
                 "inference_ms_per_sample"
             ]
         ),
+
         "samples_per_second": float(
             inference_stats[
                 "samples_per_second"
+            ]
+        ),
+
+        "inference_measured_batches": int(
+            inference_stats[
+                "measured_batches"
+            ]
+        ),
+
+        "inference_measured_samples": int(
+            inference_stats[
+                "measured_samples"
             ]
         ),
 
@@ -964,6 +1406,7 @@ def run_experiment(
             if peak_gpu_memory_mb is not None
             else None
         ),
+
         "peak_gpu_reserved_mb": (
             float(peak_gpu_reserved_mb)
             if peak_gpu_reserved_mb is not None
@@ -972,11 +1415,13 @@ def run_experiment(
     }
 
     metrics_path = (
-        experiment_directory / "metrics.json"
+        experiment_directory
+        / "metrics.json"
     )
 
     history_path = (
-        experiment_directory / "history.json"
+        experiment_directory
+        / "history.json"
     )
 
     with metrics_path.open(
@@ -999,22 +1444,33 @@ def run_experiment(
             indent=4,
         )
 
+    print("\nEsperimento completato")
+    print(f"Test MSE: {test_mse:.6f}")
+    print(f"Test MAE: {test_mae:.6f}")
     print(
-        f"Completato top_k={top_k} | "
-        f"test MSE={test_mse:.6f} | "
-        f"test MAE={test_mae:.6f}"
+        "Tempo medio per epoca: "
+        f"{average_epoch_time:.3f}s"
+    )
+    print(
+        "Inferenza: "
+        f"{inference_stats['inference_ms_per_sample']:.6f} "
+        "ms/campione"
+    )
+    print(
+        f"Metriche salvate in: {metrics_path}"
     )
 
     return metrics
 
 
+# ============================================================
+# CONFRONTO TOP-K
+# ============================================================
+
 def compare_top_k_results(
     results: list[dict],
     config_path: Path,
 ) -> None:
-    """
-    Crea tabella e grafici per il confronto tra k=1,...,5.
-    """
     import matplotlib.pyplot as plt
     import pandas as pd
 
@@ -1023,7 +1479,9 @@ def compare_top_k_results(
             "Nessun risultato da confrontare."
         )
 
-    project_root = Path(__file__).resolve().parent.parent
+    project_root = (
+        Path(__file__).resolve().parent.parent
+    )
 
     experiments_root = Path(
         os.environ.get(
@@ -1043,9 +1501,9 @@ def compare_top_k_results(
         exist_ok=True,
     )
 
-    dataframe = pd.DataFrame(results)
-
-    dataframe = dataframe.sort_values(
+    dataframe = pd.DataFrame(
+        results
+    ).sort_values(
         by="top_k"
     )
 
@@ -1075,7 +1533,8 @@ def compare_top_k_results(
         index=False,
     )
 
-    print("\nConfronto finale:")
+    print("\nConfronto finale:\n")
+
     print(
         dataframe[
             comparison_columns
@@ -1094,6 +1553,11 @@ def compare_top_k_results(
             "test_mae",
             "Test MAE",
             "mae_top_k.png",
+        ),
+        (
+            "best_validation_mse",
+            "Validation MSE",
+            "validation_mse_top_k.png",
         ),
         (
             "average_epoch_time_seconds",
@@ -1130,29 +1594,44 @@ def compare_top_k_results(
 
         plt.xlabel("top_k")
         plt.ylabel(ylabel)
-        plt.title(f"{ylabel} al variare di top_k")
+
+        plt.title(
+            f"{ylabel} al variare di top_k"
+        )
+
         plt.xticks(
             plot_data["top_k"]
         )
+
         plt.grid(True)
         plt.tight_layout()
 
         plt.savefig(
-            comparison_directory / filename,
+            comparison_directory
+            / filename,
             dpi=200,
         )
 
         plt.close()
 
+    # Selezione iperparametro sulla validation
     best_row = dataframe.loc[
-    dataframe["best_validation_mse"].idxmin()
+        dataframe[
+            "best_validation_mse"
+        ].idxmin()
     ]
 
     summary = {
-        "selection_metric": "best_validation_mse",
-        "best_top_k": int(best_row["top_k"]),
+        "selection_metric": (
+            "best_validation_mse"
+        ),
+        "best_top_k": int(
+            best_row["top_k"]
+        ),
         "best_validation_mse": float(
-            best_row["best_validation_mse"]
+            best_row[
+                "best_validation_mse"
+            ]
         ),
         "corresponding_test_mse": float(
             best_row["test_mse"]
@@ -1162,10 +1641,12 @@ def compare_top_k_results(
         ),
     }
 
-    with (
+    summary_path = (
         comparison_directory
         / "best_top_k.json"
-    ).open(
+    )
+
+    with summary_path.open(
         "w",
         encoding="utf-8",
     ) as file:
@@ -1195,6 +1676,16 @@ def compare_top_k_results(
         f"{summary['corresponding_test_mae']:.6f}"
     )
 
+    print(
+        f"Confronto salvato in: "
+        f"{comparison_directory}"
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
     args = parse_args()
 
@@ -1204,44 +1695,73 @@ def main():
 
     validate_config(config)
 
-    if args.model != "timesnet":
-        raise ValueError(
-            "Questa modalità di sweep top-k è "
-            "dedicata al modello timesnet."
+    # TimesNet originale: sweep top-k
+    if args.model == "timesnet":
+        top_k_values = sorted(
+            set(args.top_k_values)
         )
 
-    top_k_values = sorted(
-        set(args.top_k_values)
-    )
+        if not top_k_values:
+            raise ValueError(
+                "Devi specificare almeno "
+                "un valore di top_k."
+            )
 
-    if any(k <= 0 for k in top_k_values):
-        raise ValueError(
-            "Tutti i valori di top_k devono "
-            "essere maggiori di zero."
+        if any(k <= 0 for k in top_k_values):
+            raise ValueError(
+                "Tutti i valori di top_k "
+                "devono essere positivi."
+            )
+
+        print(
+            "Avvio sweep TimesNet per top_k: "
+            f"{top_k_values}"
         )
 
-    print(
-        "Avvio sweep TimesNet per top_k: "
-        f"{top_k_values}"
-    )
+        all_results = []
 
-    all_results = []
+        for top_k in top_k_values:
+            metrics = run_experiment(
+                args=args,
+                config=config,
+                config_path=config_path,
+                top_k=top_k,
+            )
 
-    for top_k in top_k_values:
-        metrics = run_experiment(
-            args=args,
-            config=config,
+            all_results.append(metrics)
+
+        compare_top_k_results(
+            results=all_results,
             config_path=config_path,
-            top_k=top_k,
         )
 
-        all_results.append(metrics)
+        return
 
-    compare_top_k_results(
-        results=all_results,
-        config_path=config_path,
+    # Tutti gli altri modelli:
+    # un singolo esperimento
+    print(
+        f"Avvio singolo esperimento: "
+        f"{args.model}"
     )
 
+    metrics = run_experiment(
+        args=args,
+        config=config,
+        config_path=config_path,
+        top_k=None,
+    )
+
+    print("\nRiepilogo:")
+    print(f"Modello: {metrics['model']}")
+    print(
+        f"Classe: {metrics['model_class']}"
+    )
+    print(
+        f"Test MSE: {metrics['test_mse']:.6f}"
+    )
+    print(
+        f"Test MAE: {metrics['test_mae']:.6f}"
+    )
 
 
 if __name__ == "__main__":
