@@ -21,345 +21,6 @@ comando colab per eseguire top k timesnet da 1 a 5 automatico: !python -m src.tr
 """
 
 
-def run_experiment(
-    args,
-    config: dict,
-    config_path: Path,
-    top_k: int,
-) -> dict:
-    """
-    Allena e valuta una singola configurazione TimesNet
-    con uno specifico valore di top_k.
-    """
-
-    # Fondamentale: stesso seed per ogni k.
-    set_seed(config["seed"])
-
-    device = get_device()
-
-    train_dataset, train_loader = build_dataloader(
-        config,
-        flag="train",
-    )
-
-    val_dataset, val_loader = build_dataloader(
-        config,
-        flag="val",
-    )
-
-    test_dataset, test_loader = build_dataloader(
-        config,
-        flag="test",
-    )
-
-    model = build_model(
-        model_name=args.model,
-        config=config,
-        top_k=top_k,
-    ).to(device)
-
-    optimizer = optim.Adam(
-        model.parameters(),
-        lr=config["learning_rate"],
-        weight_decay=config.get(
-            "weight_decay",
-            0.0,
-        ),
-    )
-
-    criterion = nn.MSELoss()
-
-    experiment_directory = create_experiment_directory(
-        model_name=args.model,
-        config_path=config_path,
-        top_k=top_k,
-    )
-
-    checkpoint_path = (
-        experiment_directory / "best_model.pth"
-    )
-
-    shutil.copy2(
-        config_path,
-        experiment_directory / "config_used.yaml",
-    )
-
-    parameter_count = sum(
-        parameter.numel()
-        for parameter in model.parameters()
-        if parameter.requires_grad
-    )
-
-    print("\n" + "=" * 70)
-    print(f"Modello: TimesNet")
-    print(f"Dataset: {config['dataset_name']}")
-    print(f"seq_len: {config['seq_len']}")
-    print(f"pred_len: {config['pred_len']}")
-    print(f"top_k: {top_k}")
-    print(f"Device: {device}")
-    print(f"Parametri: {parameter_count:,}")
-    print(f"Output: {experiment_directory}")
-    print("=" * 70)
-
-    # Verifica iniziale delle shape.
-    sample_x, sample_y = next(iter(train_loader))
-
-    with torch.no_grad():
-        sample_prediction = model(
-            sample_x.to(device)
-        ).cpu()
-
-    if sample_prediction.shape != sample_y.shape:
-        raise RuntimeError(
-            "Shape non compatibili: "
-            f"prediction={sample_prediction.shape}, "
-            f"target={sample_y.shape}"
-        )
-
-    best_validation_loss = float("inf")
-    patience = config.get("patience", 5)
-    epochs_without_improvement = 0
-
-    history = {
-        "train_mse": [],
-        "val_mse": [],
-        "epoch_time_seconds": [],
-    }
-
-    if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats(device)
-
-    synchronize_device(device)
-    training_start = time.perf_counter()
-
-    for epoch in range(
-        1,
-        config["epochs"] + 1,
-    ):
-        synchronize_device(device)
-        epoch_start = time.perf_counter()
-
-        train_mse = run_epoch(
-            model=model,
-            dataloader=train_loader,
-            criterion=criterion,
-            device=device,
-            optimizer=optimizer,
-        )
-
-        val_mse = run_epoch(
-            model=model,
-            dataloader=val_loader,
-            criterion=criterion,
-            device=device,
-            optimizer=None,
-        )
-
-        synchronize_device(device)
-
-        epoch_time = (
-            time.perf_counter() - epoch_start
-        )
-
-        history["train_mse"].append(
-            float(train_mse)
-        )
-
-        history["val_mse"].append(
-            float(val_mse)
-        )
-
-        history["epoch_time_seconds"].append(
-            float(epoch_time)
-        )
-
-        print(
-            f"k={top_k} | "
-            f"Epoch {epoch:03d}/{config['epochs']} | "
-            f"time={epoch_time:.2f}s | "
-            f"train MSE={train_mse:.6f} | "
-            f"val MSE={val_mse:.6f}"
-        )
-
-        if val_mse < best_validation_loss:
-            best_validation_loss = val_mse
-            epochs_without_improvement = 0
-
-            torch.save(
-                model.state_dict(),
-                checkpoint_path,
-            )
-        else:
-            epochs_without_improvement += 1
-
-            if epochs_without_improvement >= patience:
-                print(
-                    f"Early stopping per top_k={top_k}."
-                )
-                break
-
-    synchronize_device(device)
-
-    total_training_time = (
-        time.perf_counter() - training_start
-    )
-
-    completed_epochs = len(
-        history["epoch_time_seconds"]
-    )
-
-    average_epoch_time = float(
-        np.mean(history["epoch_time_seconds"])
-    )
-
-    model.load_state_dict(
-        torch.load(
-            checkpoint_path,
-            map_location=device,
-        )
-    )
-
-    test_mse, test_mae = evaluate_test(
-        model=model,
-        dataloader=test_loader,
-        device=device,
-    )
-
-    inference_stats = measure_inference_time(
-        model=model,
-        dataloader=test_loader,
-        device=device,
-        warmup_batches=config.get(
-            "inference_warmup_batches",
-            5,
-        ),
-        max_batches=config.get(
-            "inference_measure_batches",
-            30,
-        ),
-    )
-
-    checkpoint_size_mb = (
-        checkpoint_path.stat().st_size
-        / 1024**2
-    )
-
-    if device.type == "cuda":
-        peak_gpu_memory_mb = (
-            torch.cuda.max_memory_allocated(device)
-            / 1024**2
-        )
-
-        peak_gpu_reserved_mb = (
-            torch.cuda.max_memory_reserved(device)
-            / 1024**2
-        )
-    else:
-        peak_gpu_memory_mb = None
-        peak_gpu_reserved_mb = None
-
-    metrics = {
-        "model": "timesnet",
-        "config": config_path.stem,
-        "dataset": config["dataset_name"],
-        "seq_len": int(config["seq_len"]),
-        "pred_len": int(config["pred_len"]),
-        "batch_size": int(config["batch_size"]),
-        "top_k": int(top_k),
-        "use_fft": bool(
-            config.get("use_fft", True)
-        ),
-        "use_inception": bool(
-            config.get("use_inception", True)
-        ),
-        "device": str(device),
-
-        "trainable_parameters": int(
-            parameter_count
-        ),
-        "checkpoint_size_mb": float(
-            checkpoint_size_mb
-        ),
-
-        "completed_epochs": int(
-            completed_epochs
-        ),
-        "best_validation_mse": float(
-            best_validation_loss
-        ),
-        "total_training_time_seconds": float(
-            total_training_time
-        ),
-        "average_epoch_time_seconds": float(
-            average_epoch_time
-        ),
-
-        "test_mse": float(test_mse),
-        "test_mae": float(test_mae),
-
-        "inference_ms_per_batch": float(
-            inference_stats[
-                "inference_ms_per_batch"
-            ]
-        ),
-        "inference_ms_per_sample": float(
-            inference_stats[
-                "inference_ms_per_sample"
-            ]
-        ),
-        "samples_per_second": float(
-            inference_stats[
-                "samples_per_second"
-            ]
-        ),
-
-        "peak_gpu_memory_mb": (
-            float(peak_gpu_memory_mb)
-            if peak_gpu_memory_mb is not None
-            else None
-        ),
-        "peak_gpu_reserved_mb": (
-            float(peak_gpu_reserved_mb)
-            if peak_gpu_reserved_mb is not None
-            else None
-        ),
-    }
-
-    metrics_path = (
-        experiment_directory / "metrics.json"
-    )
-
-    history_path = (
-        experiment_directory / "history.json"
-    )
-
-    with metrics_path.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            metrics,
-            file,
-            indent=4,
-        )
-
-    with history_path.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            history,
-            file,
-            indent=4,
-        )
-
-    print(
-        f"Completato top_k={top_k} | "
-        f"test MSE={test_mse:.6f} | "
-        f"test MAE={test_mae:.6f}"
-    )
-
-    return metrics
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -385,7 +46,6 @@ def parse_args():
         choices=[
             "timesnet",
             "fixed_period_inception",
-            "top_k_inception",
             "timesnet_light_depthwise"
             "timesnet_light"
         ],
@@ -697,21 +357,17 @@ def build_model(
 def create_experiment_directory(
     model_name: str,
     config_path: Path,
-    
-    model: nn.Module,
+    model: nn.Module | None = None,
     top_k: int | None = None,
 ) -> Path:
     """
-    Crea una cartella distinta per:
+    Crea cartelle diverse in base al tipo di esperimento.
 
-    - modello;
-    - file YAML;
-    - periodo fisso effettivamente usato.
+    TimesNet:
+        experiments/timesnet_etth1_24/top_k_1/
 
-    Esempio:
-        experiments/
-        └── fixed_period_inception_etth1_24/
-            └── period_48/
+    Modelli fixed-period:
+        experiments/fixed_period_inception_etth1_24/period_24/
     """
     project_root = Path(__file__).resolve().parent.parent
 
@@ -722,56 +378,43 @@ def create_experiment_directory(
         )
     )
 
-    # Nome del file YAML senza estensione.
-    # configs/etth1_24.yaml -> etth1_24
     config_name = config_path.stem
 
-    base_experiment_name = (
-        f"{model_name}_{config_name}"
-    )
-
     base_directory = (
-        experiments_root / base_experiment_name
+        experiments_root
+        / f"{model_name}_{config_name}"
     )
-
-
-
-    fixed_period = get_model_fixed_period(model)
-
-    if fixed_period is not None:
-        experiment_directory = (
-            base_directory
-            / f"period_{fixed_period}"
-        )
-
-    else:
-        experiment_directory = base_directory
-
-    experiment_directory.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
 
     if model_name == "timesnet":
         if top_k is None:
             raise ValueError(
-                "top_k è obbligatorio per creare "
-                "la cartella TimesNet."
+                "top_k deve essere specificato per TimesNet."
             )
 
         experiment_directory = (
             base_directory
-            / f"top_k_{top_k}"
+            / f"top_k_{int(top_k)}"
         )
+
     else:
-        experiment_directory = base_directory
+        fixed_period = (
+            get_model_fixed_period(model)
+            if model is not None
+            else None
+        )
+
+        if fixed_period is not None:
+            experiment_directory = (
+                base_directory
+                / f"period_{fixed_period}"
+            )
+        else:
+            experiment_directory = base_directory
 
     experiment_directory.mkdir(
         parents=True,
         exist_ok=True,
     )
-
 
     return experiment_directory
 
@@ -1012,6 +655,348 @@ def measure_inference_time(
             total_samples / elapsed_seconds
         ),
     }
+
+def run_experiment(
+    args,
+    config: dict,
+    config_path: Path,
+    top_k: int,
+) -> dict:
+    """
+    Allena e valuta una singola configurazione TimesNet
+    con uno specifico valore di top_k.
+    """
+
+    # Fondamentale: stesso seed per ogni k.
+    set_seed(config["seed"])
+
+    device = get_device()
+
+    train_dataset, train_loader = build_dataloader(
+        config,
+        flag="train",
+    )
+
+    val_dataset, val_loader = build_dataloader(
+        config,
+        flag="val",
+    )
+
+    test_dataset, test_loader = build_dataloader(
+        config,
+        flag="test",
+    )
+
+    model = build_model(
+        model_name=args.model,
+        config=config,
+        top_k=top_k,
+    ).to(device)
+
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=config["learning_rate"],
+        weight_decay=config.get(
+            "weight_decay",
+            0.0,
+        ),
+    )
+
+    criterion = nn.MSELoss()
+
+    experiment_directory = create_experiment_directory(
+        model_name=args.model,
+        config_path=config_path,
+        top_k=top_k,
+         model=model,
+    )
+
+    checkpoint_path = (
+        experiment_directory / "best_model.pth"
+    )
+
+    shutil.copy2(
+        config_path,
+        experiment_directory / "config_used.yaml",
+    )
+
+    parameter_count = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    )
+
+    print("\n" + "=" * 70)
+    print(f"Modello: TimesNet")
+    print(f"Dataset: {config['dataset_name']}")
+    print(f"seq_len: {config['seq_len']}")
+    print(f"pred_len: {config['pred_len']}")
+    print(f"top_k: {top_k}")
+    print(f"Device: {device}")
+    print(f"Parametri: {parameter_count:,}")
+    print(f"Output: {experiment_directory}")
+    print("=" * 70)
+
+    # Verifica iniziale delle shape.
+    sample_x, sample_y = next(iter(train_loader))
+
+    with torch.no_grad():
+        sample_prediction = model(
+            sample_x.to(device)
+        ).cpu()
+
+    if sample_prediction.shape != sample_y.shape:
+        raise RuntimeError(
+            "Shape non compatibili: "
+            f"prediction={sample_prediction.shape}, "
+            f"target={sample_y.shape}"
+        )
+
+    best_validation_loss = float("inf")
+    patience = config.get("patience", 5)
+    epochs_without_improvement = 0
+
+    history = {
+        "train_mse": [],
+        "val_mse": [],
+        "epoch_time_seconds": [],
+    }
+
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+
+    synchronize_device(device)
+    training_start = time.perf_counter()
+
+    for epoch in range(
+        1,
+        config["epochs"] + 1,
+    ):
+        synchronize_device(device)
+        epoch_start = time.perf_counter()
+
+        train_mse = run_epoch(
+            model=model,
+            dataloader=train_loader,
+            criterion=criterion,
+            device=device,
+            optimizer=optimizer,
+        )
+
+        val_mse = run_epoch(
+            model=model,
+            dataloader=val_loader,
+            criterion=criterion,
+            device=device,
+            optimizer=None,
+        )
+
+        synchronize_device(device)
+
+        epoch_time = (
+            time.perf_counter() - epoch_start
+        )
+
+        history["train_mse"].append(
+            float(train_mse)
+        )
+
+        history["val_mse"].append(
+            float(val_mse)
+        )
+
+        history["epoch_time_seconds"].append(
+            float(epoch_time)
+        )
+
+        print(
+            f"k={top_k} | "
+            f"Epoch {epoch:03d}/{config['epochs']} | "
+            f"time={epoch_time:.2f}s | "
+            f"train MSE={train_mse:.6f} | "
+            f"val MSE={val_mse:.6f}"
+        )
+
+        if val_mse < best_validation_loss:
+            best_validation_loss = val_mse
+            epochs_without_improvement = 0
+
+            torch.save(
+                model.state_dict(),
+                checkpoint_path,
+            )
+        else:
+            epochs_without_improvement += 1
+
+            if epochs_without_improvement >= patience:
+                print(
+                    f"Early stopping per top_k={top_k}."
+                )
+                break
+
+    synchronize_device(device)
+
+    total_training_time = (
+        time.perf_counter() - training_start
+    )
+
+    completed_epochs = len(
+        history["epoch_time_seconds"]
+    )
+
+    average_epoch_time = float(
+        np.mean(history["epoch_time_seconds"])
+    )
+
+    model.load_state_dict(
+        torch.load(
+            checkpoint_path,
+            map_location=device,
+        )
+    )
+
+    test_mse, test_mae = evaluate_test(
+        model=model,
+        dataloader=test_loader,
+        device=device,
+    )
+
+    inference_stats = measure_inference_time(
+        model=model,
+        dataloader=test_loader,
+        device=device,
+        warmup_batches=config.get(
+            "inference_warmup_batches",
+            5,
+        ),
+        max_batches=config.get(
+            "inference_measure_batches",
+            30,
+        ),
+    )
+
+    checkpoint_size_mb = (
+        checkpoint_path.stat().st_size
+        / 1024**2
+    )
+
+    if device.type == "cuda":
+        peak_gpu_memory_mb = (
+            torch.cuda.max_memory_allocated(device)
+            / 1024**2
+        )
+
+        peak_gpu_reserved_mb = (
+            torch.cuda.max_memory_reserved(device)
+            / 1024**2
+        )
+    else:
+        peak_gpu_memory_mb = None
+        peak_gpu_reserved_mb = None
+
+    metrics = {
+        "model": "timesnet",
+        "config": config_path.stem,
+        "dataset": config["dataset_name"],
+        "seq_len": int(config["seq_len"]),
+        "pred_len": int(config["pred_len"]),
+        "batch_size": int(config["batch_size"]),
+        "top_k": int(top_k),
+        "use_fft": bool(
+            config.get("use_fft", True)
+        ),
+        "use_inception": bool(
+            config.get("use_inception", True)
+        ),
+        "device": str(device),
+
+        "trainable_parameters": int(
+            parameter_count
+        ),
+        "checkpoint_size_mb": float(
+            checkpoint_size_mb
+        ),
+
+        "completed_epochs": int(
+            completed_epochs
+        ),
+        "best_validation_mse": float(
+            best_validation_loss
+        ),
+        "total_training_time_seconds": float(
+            total_training_time
+        ),
+        "average_epoch_time_seconds": float(
+            average_epoch_time
+        ),
+
+        "test_mse": float(test_mse),
+        "test_mae": float(test_mae),
+
+        "inference_ms_per_batch": float(
+            inference_stats[
+                "inference_ms_per_batch"
+            ]
+        ),
+        "inference_ms_per_sample": float(
+            inference_stats[
+                "inference_ms_per_sample"
+            ]
+        ),
+        "samples_per_second": float(
+            inference_stats[
+                "samples_per_second"
+            ]
+        ),
+
+        "peak_gpu_memory_mb": (
+            float(peak_gpu_memory_mb)
+            if peak_gpu_memory_mb is not None
+            else None
+        ),
+        "peak_gpu_reserved_mb": (
+            float(peak_gpu_reserved_mb)
+            if peak_gpu_reserved_mb is not None
+            else None
+        ),
+    }
+
+    metrics_path = (
+        experiment_directory / "metrics.json"
+    )
+
+    history_path = (
+        experiment_directory / "history.json"
+    )
+
+    with metrics_path.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            metrics,
+            file,
+            indent=4,
+        )
+
+    with history_path.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            history,
+            file,
+            indent=4,
+        )
+
+    print(
+        f"Completato top_k={top_k} | "
+        f"test MSE={test_mse:.6f} | "
+        f"test MAE={test_mae:.6f}"
+    )
+
+    return metrics
+
 
 def compare_top_k_results(
     results: list[dict],
