@@ -2,6 +2,7 @@ import argparse
 import json
 import random
 import shutil
+import time
 from pathlib import Path
 
 import numpy as np
@@ -486,6 +487,115 @@ def evaluate_test(
 
     return mse, mae
 
+def synchronize_device(device: torch.device) -> None:
+    """
+    Attende il completamento delle operazioni asincrone.
+
+    È necessario soprattutto su CUDA per misurare correttamente
+    i tempi di esecuzione.
+    """
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+    elif device.type == "mps":
+        torch.mps.synchronize()
+
+
+def measure_inference_time(
+    model: nn.Module,
+    dataloader,
+    device: torch.device,
+    warmup_batches: int = 5,
+    max_batches: int = 30,
+) -> dict:
+    """
+    Misura il tempo di inferenza del modello.
+
+    Restituisce:
+        - millisecondi medi per batch;
+        - millisecondi medi per campione;
+        - campioni elaborati al secondo.
+
+    Il warm-up evita di includere nel risultato inizializzazioni
+    CUDA e allocazioni eseguite soltanto al primo forward.
+    """
+    model.eval()
+
+    batches = list(dataloader)
+
+    if not batches:
+        raise RuntimeError(
+            "Impossibile misurare l'inferenza: "
+            "il DataLoader è vuoto."
+        )
+
+    # Warm-up
+    with torch.no_grad():
+        for index in range(
+            min(warmup_batches, len(batches))
+        ):
+            batch_x, _ = batches[index]
+
+            batch_x = batch_x.to(
+                device,
+                non_blocking=True,
+            )
+
+            _ = model(batch_x)
+
+    synchronize_device(device)
+
+    measured_batches = min(
+        max_batches,
+        len(batches),
+    )
+
+    total_samples = 0
+
+    start_time = time.perf_counter()
+
+    with torch.no_grad():
+        for index in range(measured_batches):
+            batch_x, _ = batches[index]
+
+            batch_x = batch_x.to(
+                device,
+                non_blocking=True,
+            )
+
+            _ = model(batch_x)
+
+            total_samples += batch_x.size(0)
+
+    synchronize_device(device)
+
+    elapsed_seconds = (
+        time.perf_counter() - start_time
+    )
+
+    if measured_batches == 0 or total_samples == 0:
+        raise RuntimeError(
+            "Nessun batch misurato durante l'inferenza."
+        )
+
+    return {
+        "measured_batches": measured_batches,
+        "measured_samples": total_samples,
+        "total_inference_seconds": elapsed_seconds,
+        "inference_ms_per_batch": (
+            elapsed_seconds
+            / measured_batches
+            * 1000
+        ),
+        "inference_ms_per_sample": (
+            elapsed_seconds
+            / total_samples
+            * 1000
+        ),
+        "samples_per_second": (
+            total_samples / elapsed_seconds
+        ),
+    }
 
 def main():
     args = parse_args()
@@ -604,12 +714,24 @@ def main():
     history = {
         "train_mse": [],
         "val_mse": [],
+        "epoch_time_seconds": [],
     }
+
+    # Reset della memoria GPU dopo il controllo iniziale delle shape.
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+
+    synchronize_device(device)
+
+    training_start_time = time.perf_counter()
 
     for epoch in range(
         1,
         config["epochs"] + 1,
     ):
+        synchronize_device(device)
+        epoch_start_time = time.perf_counter()
+
         train_mse = run_epoch(
             model=model,
             dataloader=train_loader,
@@ -626,6 +748,16 @@ def main():
             optimizer=None,
         )
 
+        synchronize_device(device)
+
+        epoch_time_seconds = (
+            time.perf_counter() - epoch_start_time
+        )
+
+        history["epoch_time_seconds"].append(
+            epoch_time_seconds
+        )
+
         history["train_mse"].append(
             train_mse
         )
@@ -635,10 +767,11 @@ def main():
         )
 
         print(
-            f"Epoch {epoch:03d}/"
-            f"{config['epochs']} | "
-            f"train MSE={train_mse:.6f} | "
-            f"val MSE={val_mse:.6f}"
+        f"Epoch {epoch:03d}/"
+        f"{config['epochs']} | "
+        f"time={epoch_time_seconds:.2f}s | "
+        f"train MSE={train_mse:.6f} | "
+        f"val MSE={val_mse:.6f}"
         )
 
         if val_mse < best_validation_loss:
@@ -666,6 +799,27 @@ def main():
                 print("Early stopping.")
                 break
 
+
+    synchronize_device(device)
+
+    total_training_time_seconds = (
+        time.perf_counter() - training_start_time
+    )
+
+    completed_epochs = len(
+        history["epoch_time_seconds"]
+    )
+
+    average_epoch_time_seconds = (
+        float(
+            np.mean(
+                history["epoch_time_seconds"]
+            )
+        )
+        if completed_epochs > 0
+        else None
+    )
+
     model.load_state_dict(
         torch.load(
             checkpoint_path,
@@ -679,54 +833,159 @@ def main():
         device=device,
     )
 
+    inference_stats = measure_inference_time(
+        model=model,
+        dataloader=test_loader,
+        device=device,
+        warmup_batches=config.get(
+            "inference_warmup_batches",
+            5,
+        ),
+        max_batches=config.get(
+            "inference_measure_batches",
+            30,
+        ),
+    )
+
+    checkpoint_size_mb = (
+        checkpoint_path.stat().st_size
+        / 1024**2
+    )
+
+    if device.type == "cuda":
+        peak_gpu_memory_mb = (
+            torch.cuda.max_memory_allocated(device)
+            / 1024**2
+        )
+
+        peak_gpu_reserved_mb = (
+            torch.cuda.max_memory_reserved(device)
+            / 1024**2
+        )
+    else:
+        peak_gpu_memory_mb = None
+        peak_gpu_reserved_mb = None
+    
     metrics = {
         "model": args.model,
         "config": config_path.stem,
         "dataset": config["dataset_name"],
-        "seq_len": config["seq_len"],
-        "pred_len": config["pred_len"],
+
+        "seq_len": int(config["seq_len"]),
+        "pred_len": int(config["pred_len"]),
+        "batch_size": int(config["batch_size"]),
+
         "fixed_period": (
-           int(model.period)
-            if args.model == "fixed_period_inception"
+            int(model.period)
+            if hasattr(model, "period")
             else None
         ),
-        "trainable_parameters": parameter_count,
-        "best_validation_mse": (
+
+        "top_k": (
+            int(config["top_k"])
+            if args.model in {
+                "timesnet",
+                "top_k_inception",
+            }
+            and "top_k" in config
+            else None
+        ),
+
+        "device": str(device),
+
+        # Complessità statica
+        "trainable_parameters": int(
+            parameter_count
+        ),
+        "checkpoint_size_mb": float(
+            checkpoint_size_mb
+        ),
+
+        # Training
+        "completed_epochs": int(
+            completed_epochs
+        ),
+        "best_validation_mse": float(
             best_validation_loss
         ),
-        "test_mse": test_mse,
-        "test_mae": test_mae,
+        "total_training_time_seconds": float(
+            total_training_time_seconds
+        ),
+        "average_epoch_time_seconds": (
+            float(average_epoch_time_seconds)
+            if average_epoch_time_seconds
+            is not None
+            else None
+        ),
+
+        # Qualità previsionale
+        "test_mse": float(test_mse),
+        "test_mae": float(test_mae),
+
+        # Inferenza
+        "inference_ms_per_batch": float(
+            inference_stats[
+                "inference_ms_per_batch"
+            ]
+        ),
+        "inference_ms_per_sample": float(
+            inference_stats[
+                "inference_ms_per_sample"
+            ]
+        ),
+        "samples_per_second": float(
+            inference_stats[
+                "samples_per_second"
+            ]
+        ),
+        "inference_measured_batches": int(
+            inference_stats[
+                "measured_batches"
+            ]
+        ),
+        "inference_measured_samples": int(
+            inference_stats[
+                "measured_samples"
+            ]
+        ),
+
+        # Memoria
+        "peak_gpu_memory_mb": (
+            float(peak_gpu_memory_mb)
+            if peak_gpu_memory_mb is not None
+            else None
+        ),
+        "peak_gpu_reserved_mb": (
+            float(peak_gpu_reserved_mb)
+            if peak_gpu_reserved_mb is not None
+            else None
+        ),
     }
-
-    with (
-        experiment_directory
-        / "metrics.json"
-    ).open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            metrics,
-            file,
-            indent=4,
-        )
-
-    with (
-        experiment_directory
-        / "history.json"
-    ).open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            history,
-            file,
-            indent=4,
-        )
 
     print("=" * 60)
     print(f"Test MSE: {test_mse:.6f}")
     print(f"Test MAE: {test_mae:.6f}")
+    print(
+        "Tempo medio/epoca: "
+        f"{average_epoch_time_seconds:.2f}s"
+    )
+    print(
+        "Inferenza: "
+        f"{inference_stats['inference_ms_per_sample']:.4f} "
+        "ms/campione"
+    )
+    print(
+        "Throughput: "
+        f"{inference_stats['samples_per_second']:.2f} "
+        "campioni/s"
+    )
+
+    if peak_gpu_memory_mb is not None:
+        print(
+            f"Peak GPU memory: "
+            f"{peak_gpu_memory_mb:.2f} MB"
+        )
+
     print(f"Risultati: {experiment_directory}")
     print("=" * 60)
 
