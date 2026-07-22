@@ -45,7 +45,7 @@ class DepthwiseSeparableBlock2D(nn.Module):
         )
 
     def forward(self, x):
-        return x + self.net(x)   # residual interna
+        return self.net(x)   # residual interna
 
 class LightTimesBlock(nn.Module):
     """

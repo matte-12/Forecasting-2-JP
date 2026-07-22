@@ -40,6 +40,7 @@ def parse_args():
             "timesnet",
             "fixed_period_inception",
             "top_k_inception",
+            "timesnet_light_depthwise"
         ],
         help="Architettura 2D da allenare.",
     )
@@ -181,6 +182,26 @@ def get_device() -> torch.device:
 
     return torch.device("cpu")
 
+def get_model_fixed_period(
+    model: nn.Module,
+):
+    """
+    Restituisce il periodo effettivamente usato dal modello,
+    indipendentemente dalla sua implementazione interna.
+    """
+    if hasattr(model, "period"):
+        return int(model.period)
+
+    if hasattr(model, "fixed_period"):
+        return int(model.fixed_period)
+
+    if (
+        hasattr(model, "times_block")
+        and hasattr(model.times_block, "fixed_period")
+    ):
+        return int(model.times_block.fixed_period)
+
+    return None
 
 def build_model(
     model_name: str,
@@ -297,6 +318,21 @@ def build_model(
             ),
         )
 
+    if model_name == "timesnet_light_depthwise":
+        from models.models_light_depthwise import (
+            TimesNetLightMod1,
+        )
+
+        return TimesNetLightMod1(
+            seq_len=config["seq_len"],
+            pred_len=config["pred_len"],
+            num_features=config["num_features"],
+            d_model=config.get("d_model", 32),
+            d_ff=config.get("d_ff", 64),
+            top_k=config.get("top_k", 3),
+            dropout=config.get("dropout", 0.1),
+        )
+
     raise ValueError(
         f"Modello non riconosciuto: {model_name}"
     )
@@ -341,12 +377,12 @@ def create_experiment_directory(
         experiments_root / base_experiment_name
     )
 
-    if model_name == "fixed_period_inception":
-        # Leggiamo il valore realmente utilizzato dalla rete.
-        period = int(model.period)
+    fixed_period = get_model_fixed_period(model)
 
+    if fixed_period is not None:
         experiment_directory = (
-            base_directory / f"period_{period}"
+            base_directory
+            / f"period_{fixed_period}"
         )
 
     else:
@@ -603,6 +639,14 @@ def main():
     config, config_path = load_config(
         args.config
     )
+
+    effective_fixed_period = get_model_fixed_period(model)
+
+    if effective_fixed_period is not None:
+        print(
+        "Periodo fixed usato dal modello: "
+        f"{effective_fixed_period}"
+         )
 
     validate_config(config)
     set_seed(config["seed"])
@@ -875,11 +919,7 @@ def main():
         "pred_len": int(config["pred_len"]),
         "batch_size": int(config["batch_size"]),
 
-        "fixed_period": (
-            int(model.period)
-            if hasattr(model, "period")
-            else None
-        ),
+        "fixed_period": effective_fixed_period,
 
         "top_k": (
             int(config["top_k"])
