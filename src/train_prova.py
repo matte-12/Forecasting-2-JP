@@ -962,6 +962,32 @@ def main():
         ),
     }
 
+        # Percorsi dei file dei risultati
+    metrics_path = experiment_directory / "metrics.json"
+    history_path = experiment_directory / "history.json"
+
+    # Salvataggio di tutte le metriche aggregate
+    with metrics_path.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            metrics,
+            file,
+            indent=4,
+        )
+
+    # Salvataggio della history epoca per epoca
+    with history_path.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            history,
+            file,
+            indent=4,
+        )
+
     print("=" * 60)
     print(f"Test MSE: {test_mse:.6f}")
     print(f"Test MAE: {test_mae:.6f}")
