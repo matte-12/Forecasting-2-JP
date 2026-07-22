@@ -25,7 +25,7 @@ seed: 42
 
 # Parametri period-aware
 top_k: 3
-use_fft: false
+use_fft: true
 fixed_period: 24
 use_inception: true
 

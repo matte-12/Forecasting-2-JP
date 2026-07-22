@@ -1176,13 +1176,23 @@ def compare_top_k_results(
         )
 
     print(
-        "\nMiglior top_k per test MSE: "
-        f"{summary['best_top_k_by_test_mse']}"
+        "\nMiglior top_k sulla validation: "
+        f"{summary['best_top_k']}"
     )
 
     print(
-        f"Confronto salvato in: "
-        f"{comparison_directory}"
+        "Validation MSE: "
+        f"{summary['best_validation_mse']:.6f}"
+    )
+
+    print(
+        "Test MSE corrispondente: "
+        f"{summary['corresponding_test_mse']:.6f}"
+    )
+
+    print(
+        "Test MAE corrispondente: "
+        f"{summary['corresponding_test_mae']:.6f}"
     )
 
 def main():
