@@ -336,10 +336,10 @@ def build_model(
 
     if model_name == "timesnet_light_depthwise":
         from models.models_light_depthwise import (
-            TimesNetLightMod1,
+            LightTimesNet,
         )
 
-        return TimesNetLightMod1(
+        return LightTimesNet(
             seq_len=config["seq_len"],
             pred_len=config["pred_len"],
             num_features=config["num_features"],
