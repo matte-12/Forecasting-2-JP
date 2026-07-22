@@ -46,8 +46,8 @@ def parse_args():
         choices=[
             "timesnet",
             "fixed_period_inception",
-            "timesnet_light_depthwise"
-            "timesnet_light"
+            "timesnet_light_depthwise",
+            "timesnet_light",
         ],
         help="Architettura 2D da allenare.",
     )
@@ -715,10 +715,20 @@ def run_experiment(
         experiment_directory / "best_model.pth"
     )
 
-    shutil.copy2(
-        config_path,
-        experiment_directory / "config_used.yaml",
-    )
+    config_used = dict(config)
+    config_used["top_k"] = int(top_k)
+
+    with (
+        experiment_directory / "config_used.yaml"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        yaml.safe_dump(
+            config_used,
+            file,
+            sort_keys=False,
+        )
 
     parameter_count = sum(
         parameter.numel()
@@ -1135,14 +1145,16 @@ def compare_top_k_results(
         plt.close()
 
     best_row = dataframe.loc[
-        dataframe["test_mse"].idxmin()
+    dataframe["best_validation_mse"].idxmin()
     ]
 
     summary = {
-        "best_top_k_by_test_mse": int(
-            best_row["top_k"]
+        "selection_metric": "best_validation_mse",
+        "best_top_k": int(best_row["top_k"]),
+        "best_validation_mse": float(
+            best_row["best_validation_mse"]
         ),
-        "best_test_mse": float(
+        "corresponding_test_mse": float(
             best_row["test_mse"]
         ),
         "corresponding_test_mae": float(
