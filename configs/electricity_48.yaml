@@ -1,0 +1,14 @@
+dataset_name: electricity
+csv_path: data/electricity/electricity.csv
+seq_len: 96
+pred_len: 48
+batch_size: 32
+num_workers: 0
+shuffle_train: true
+drop_last_train: true
+num_features: 321
+epochs: 20
+learning_rate: 0.001
+weight_decay: 0.0
+seed: 42
+fixed_period: 24
