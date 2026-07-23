@@ -652,38 +652,82 @@ def get_model_fixed_period(
     return None
 
 
+def sanitize_name(name: str) -> str:
+    """
+    Rende un nome sicuro per essere usato come cartella.
+    """
+    return (
+        str(name)
+        .strip()
+        .replace(" ", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+    )
+
+
 def get_experiment_model_name(
     model_name: str,
-    requested_class: Optional[str],
+    requested_class: str | None,
+    model: nn.Module,
 ) -> str:
-    if (
-        model_name == "models_1d"
-        and requested_class is not None
-    ):
-        safe_class_name = (
+    """
+    Costruisce il nome dell'esperimento includendo la classe
+    concreta del modello.
+
+    Esempi:
+        timesnet
+        timesnet_light_LightTimesNetMultiScale
+        timesnet_light_LightTimesNetDepthwise
+        models_1d_CNN1D
+    """
+
+    # Per TimesNet classica la distinzione viene fatta con top_k.
+    if model_name == "timesnet":
+        return "timesnet"
+
+    # Usa --model-class quando è stato specificato.
+    if requested_class is not None:
+        class_name = sanitize_name(
             requested_class
-            .replace(" ", "_")
-            .lower()
         )
 
-        return (
-            f"{model_name}_{safe_class_name}"
+    # Altrimenti usa la classe realmente istanziata.
+    else:
+        class_name = sanitize_name(
+            model.__class__.__name__
         )
 
-    return model_name
+    return (
+        f"{sanitize_name(model_name)}_"
+        f"{class_name}"
+    )
 
-
-# ============================================================
-# CARTELLE
-# ============================================================
 
 def create_experiment_directory(
     model_name: str,
     config_path: Path,
     model: nn.Module,
-    top_k: Optional[int] = None,
-    requested_class: Optional[str] = None,
+    top_k: int | None = None,
+    requested_class: str | None = None,
 ) -> Path:
+    """
+    Crea una directory distinta per modello, classe e configurazione.
+
+    TimesNet:
+        experiments/
+        └── timesnet_etth1_24/
+            └── top_k_3/
+
+    TimesNet Light:
+        experiments/
+        └── timesnet_light_LightTimesNetMultiScale_etth1_24/
+            └── period_24/
+
+    Modelli senza top_k e senza periodo:
+        experiments/
+        └── models_1d_CNN1D_etth1_24/
+    """
+
     project_root = (
         Path(__file__).resolve().parent.parent
     )
@@ -699,20 +743,25 @@ def create_experiment_directory(
         get_experiment_model_name(
             model_name=model_name,
             requested_class=requested_class,
+            model=model,
         )
+    )
+
+    config_name = sanitize_name(
+        config_path.stem
     )
 
     base_directory = (
         experiments_root
-        / f"{experiment_model_name}_"
-          f"{config_path.stem}"
+        / f"{experiment_model_name}_{config_name}"
     )
 
+    # TimesNet originale: cartella diversa per ogni top_k.
     if model_name == "timesnet":
         if top_k is None:
             raise ValueError(
                 "top_k deve essere specificato "
-                "per TimesNet."
+                "per il modello TimesNet."
             )
 
         experiment_directory = (
@@ -720,6 +769,7 @@ def create_experiment_directory(
             / f"top_k_{int(top_k)}"
         )
 
+    # Modelli a periodo fisso.
     else:
         fixed_period = get_model_fixed_period(
             model
@@ -728,7 +778,7 @@ def create_experiment_directory(
         if fixed_period is not None:
             experiment_directory = (
                 base_directory
-                / f"period_{fixed_period}"
+                / f"period_{int(fixed_period)}"
             )
         else:
             experiment_directory = (
@@ -1040,6 +1090,17 @@ def run_experiment(
     )
 
     config_used = dict(config)
+
+    config_used["selected_model"] = args.model
+    config_used["selected_model_class"] = (
+        model.__class__.__name__
+    )
+
+    config_used["backbone_2d"] = getattr(
+        model,
+        "block_type",
+        None,
+    )
 
     if top_k is not None:
         config_used["top_k"] = int(top_k)
@@ -1371,7 +1432,7 @@ def run_experiment(
             == "group"
             else None
         ),
-        
+
         "device": str(device),
 
         "trainable_parameters": int(
