@@ -2,15 +2,18 @@ import math
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
+
+# ============================================================
+# INCEPTION MULTI-SCALA
+# ============================================================
 
 class InceptionBlock2D(nn.Module):
     """
     Blocco Inception 2D multi-scala.
 
     Applica più kernel in parallelo alla stessa rappresentazione
-    periodica 2D e ne combina i risultati tramite media.
+    periodica 2D e combina i risultati tramite media.
     """
 
     def __init__(
@@ -22,10 +25,25 @@ class InceptionBlock2D(nn.Module):
         super().__init__()
 
         if not kernel_sizes:
-            raise ValueError("kernel_sizes non può essere vuoto")
+            raise ValueError(
+                "kernel_sizes non può essere vuoto."
+            )
 
-        if any(kernel <= 0 or kernel % 2 == 0 for kernel in kernel_sizes):
-            raise ValueError("I kernel devono essere interi positivi e dispari")
+        kernel_sizes = tuple(
+            int(kernel)
+            for kernel in kernel_sizes
+        )
+
+        if any(
+            kernel <= 0 or kernel % 2 == 0
+            for kernel in kernel_sizes
+        ):
+            raise ValueError(
+                "I kernel devono essere interi "
+                "positivi e dispari."
+            )
+
+        self.kernel_sizes = kernel_sizes
 
         self.branches = nn.ModuleList(
             [
@@ -35,38 +53,246 @@ class InceptionBlock2D(nn.Module):
                     kernel_size=kernel,
                     padding=kernel // 2,
                 )
-                for kernel in kernel_sizes
+                for kernel in self.kernel_sizes
             ]
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Ogni ramo osserva il tensore con un campo recettivo diverso.
-        branch_outputs = [branch(x) for branch in self.branches]
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        branch_outputs = [
+            branch(x)
+            for branch in self.branches
+        ]
 
-        # Shape: (num_branches, B, C, cycles, period)
-        stacked = torch.stack(branch_outputs, dim=0)
+        stacked_outputs = torch.stack(
+            branch_outputs,
+            dim=0,
+        )
 
-        return stacked.mean(dim=0)
+        return stacked_outputs.mean(
+            dim=0
+        )
 
+
+# ============================================================
+# SINGO TIMES BLOCK
+# ============================================================
+
+class FixedPeriodTimesBlock(nn.Module):
+    """
+    Singolo TimesBlock con periodo fissato.
+
+    Input:
+        [B, seq_len, d_model]
+
+    Output:
+        [B, seq_len, d_model]
+    """
+
+    def __init__(
+        self,
+        seq_len: int,
+        period: int,
+        d_model: int,
+        d_ff: int,
+        kernel_sizes=(1, 3, 5),
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+
+        if seq_len <= 0:
+            raise ValueError(
+                "seq_len deve essere positivo."
+            )
+
+        if period <= 0:
+            raise ValueError(
+                "period deve essere positivo."
+            )
+
+        self.seq_len = int(seq_len)
+        self.period = int(period)
+        self.d_model = int(d_model)
+        self.d_ff = int(d_ff)
+
+        self.num_cycles = math.ceil(
+            self.seq_len / self.period
+        )
+
+        self.padded_len = (
+            self.num_cycles
+            * self.period
+        )
+
+        self.inception_1 = InceptionBlock2D(
+            in_channels=self.d_model,
+            out_channels=self.d_ff,
+            kernel_sizes=kernel_sizes,
+        )
+
+        self.inception_2 = InceptionBlock2D(
+            in_channels=self.d_ff,
+            out_channels=self.d_model,
+            kernel_sizes=kernel_sizes,
+        )
+
+        self.activation = nn.GELU()
+
+        self.dropout = nn.Dropout(
+            float(dropout)
+        )
+
+        self.normalization = nn.LayerNorm(
+            self.d_model
+        )
+
+    def _to_periodic_2d(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        [B, T, d_model]
+        ->
+        [B, d_model, num_cycles, period]
+        """
+        batch_size, time_steps, channels = (
+            x.shape
+        )
+
+        if time_steps != self.seq_len:
+            raise ValueError(
+                f"seq_len attesa={self.seq_len}, "
+                f"ricevuta={time_steps}."
+            )
+
+        padding_length = (
+            self.padded_len
+            - time_steps
+        )
+
+        if padding_length > 0:
+            padding = x[:, -1:, :].repeat(
+                1,
+                padding_length,
+                1,
+            )
+
+            x = torch.cat(
+                [x, padding],
+                dim=1,
+            )
+
+        x = x.reshape(
+            batch_size,
+            self.num_cycles,
+            self.period,
+            channels,
+        )
+
+        return x.permute(
+            0,
+            3,
+            1,
+            2,
+        ).contiguous()
+
+    def _to_temporal_1d(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        [B, d_model, num_cycles, period]
+        ->
+        [B, seq_len, d_model]
+        """
+        batch_size, channels, _, _ = (
+            x.shape
+        )
+
+        x = x.permute(
+            0,
+            2,
+            3,
+            1,
+        ).contiguous()
+
+        x = x.reshape(
+            batch_size,
+            self.padded_len,
+            channels,
+        )
+
+        return x[
+            :,
+            :self.seq_len,
+            :,
+        ]
+
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        if x.ndim != 3:
+            raise ValueError(
+                "FixedPeriodTimesBlock richiede "
+                "un input [B, T, d_model]."
+            )
+
+        residual = x
+
+        periodic_2d = (
+            self._to_periodic_2d(x)
+        )
+
+        features_2d = self.inception_1(
+            periodic_2d
+        )
+
+        features_2d = self.activation(
+            features_2d
+        )
+
+        features_2d = self.dropout(
+            features_2d
+        )
+
+        features_2d = self.inception_2(
+            features_2d
+        )
+
+        features_2d = self.dropout(
+            features_2d
+        )
+
+        features_1d = (
+            self._to_temporal_1d(
+                features_2d
+            )
+        )
+
+        return self.normalization(
+            features_1d + residual
+        )
+
+
+# ============================================================
+# MODELLO COMPLETO
+# ============================================================
 
 class FixedPeriodInception2D(nn.Module):
     """
-    Modello TimesNet-inspired con periodo fissato manualmente.
+    Modello TimesNet-inspired con periodo noto.
 
-    Flusso:
-        (B, T, C)
-        → embedding
-        → reshape periodico 2D
-        → Inception multi-scala
-        → ritorno 1D
-        → residual connection
-        → proiezione verso pred_len
+    num_blocks determina quanti TimesBlock vengono applicati
+    consecutivamente.
 
     Input:
-        (batch, seq_len, num_features)
+        [B, seq_len, num_features]
 
     Output:
-        (batch, pred_len, num_features)
+        [B, pred_len, num_features]
     """
 
     def __init__(
@@ -79,156 +305,149 @@ class FixedPeriodInception2D(nn.Module):
         d_ff: int = 64,
         kernel_sizes=(1, 3, 5),
         dropout: float = 0.1,
+        num_blocks: int = 1,
     ):
         super().__init__()
 
-        if seq_len <= 0 or pred_len <= 0:
-            raise ValueError("seq_len e pred_len devono essere positivi")
-
-        if period <= 0:
-            raise ValueError("period deve essere positivo")
-
-        self.seq_len = seq_len
-        self.pred_len = pred_len
-        self.num_features = num_features
-        self.period = period
-
-        # Numero di cicli necessari per contenere seq_len.
-        # ETTh1: 96 / 24 = 4 cicli giornalieri.
-        self.num_cycles = math.ceil(seq_len / period)
-        self.padded_len = self.num_cycles * period
-
-        # Proiezione delle feature originali nello spazio latente.
-        self.embedding = nn.Linear(num_features, d_model)
-
-        # Struttura vicina al TimesBlock:
-        # d_model → d_ff → d_model.
-        self.inception_1 = InceptionBlock2D(
-            in_channels=d_model,
-            out_channels=d_ff,
-            kernel_sizes=kernel_sizes,
-        )
-
-        self.inception_2 = InceptionBlock2D(
-            in_channels=d_ff,
-            out_channels=d_model,
-            kernel_sizes=kernel_sizes,
-        )
-
-        self.activation = nn.GELU()
-        self.dropout = nn.Dropout(dropout)
-        self.normalization = nn.LayerNorm(d_model)
-
-        # Proiezione temporale seq_len → pred_len.
-        self.temporal_projection = nn.Linear(
-            seq_len,
-            pred_len,
-        )
-
-        # Ritorno alle feature originali.
-        self.output_projection = nn.Linear(
-            d_model,
-            num_features,
-        )
-
-    def _to_periodic_2d(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Trasforma:
-            (B, T, d_model)
-        in:
-            (B, d_model, num_cycles, period)
-        """
-        batch_size, time_steps, channels = x.shape
-
-        if time_steps != self.seq_len:
+        if seq_len <= 0:
             raise ValueError(
-                f"seq_len attesa={self.seq_len}, ricevuta={time_steps}"
+                "seq_len deve essere positivo."
             )
 
-        padding_length = self.padded_len - time_steps
+        if pred_len <= 0:
+            raise ValueError(
+                "pred_len deve essere positivo."
+            )
 
-        if padding_length > 0:
-            # Ripete l'ultimo timestep per completare il ciclo.
-            padding = x[:, -1:, :].repeat(1, padding_length, 1)
-            x = torch.cat([x, padding], dim=1)
+        if num_features <= 0:
+            raise ValueError(
+                "num_features deve essere positivo."
+            )
 
-        # (B, padded_len, d_model)
-        # → (B, cycles, period, d_model)
-        x = x.reshape(
-            batch_size,
-            self.num_cycles,
-            self.period,
-            channels,
+        if period <= 0:
+            raise ValueError(
+                "period deve essere positivo."
+            )
+
+        if num_blocks <= 0:
+            raise ValueError(
+                "num_blocks deve essere positivo."
+            )
+
+        self.seq_len = int(seq_len)
+        self.pred_len = int(pred_len)
+        self.num_features = int(
+            num_features
         )
 
-        # Conv2d usa (B, channels, height, width).
-        return x.permute(0, 3, 1, 2).contiguous()
+        self.period = int(period)
+        self.fixed_period = int(period)
 
-    def _to_temporal_1d(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Trasforma:
-            (B, d_model, num_cycles, period)
-        in:
-            (B, seq_len, d_model)
-        """
-        batch_size, channels, _, _ = x.shape
-
-        x = x.permute(0, 2, 3, 1).contiguous()
-
-        x = x.reshape(
-            batch_size,
-            self.padded_len,
-            channels,
+        self.d_model = int(d_model)
+        self.d_ff = int(d_ff)
+        self.num_blocks = int(
+            num_blocks
         )
 
-        return x[:, :self.seq_len, :]
+        self.kernel_sizes = tuple(
+            int(kernel)
+            for kernel in kernel_sizes
+        )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.embedding = nn.Linear(
+            self.num_features,
+            self.d_model,
+        )
+
+        self.times_blocks = nn.ModuleList(
+            [
+                FixedPeriodTimesBlock(
+                    seq_len=self.seq_len,
+                    period=self.period,
+                    d_model=self.d_model,
+                    d_ff=self.d_ff,
+                    kernel_sizes=(
+                        self.kernel_sizes
+                    ),
+                    dropout=dropout,
+                )
+                for _ in range(
+                    self.num_blocks
+                )
+            ]
+        )
+
+        self.temporal_projection = nn.Linear(
+            self.seq_len,
+            self.pred_len,
+        )
+
+        self.output_projection = nn.Linear(
+            self.d_model,
+            self.num_features,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
         if x.ndim != 3:
             raise ValueError(
-                "L'input deve avere shape (batch, seq_len, num_features)"
+                "L'input deve avere shape "
+                "[B, seq_len, num_features]."
+            )
+
+        if x.shape[1] != self.seq_len:
+            raise ValueError(
+                f"seq_len attesa={self.seq_len}, "
+                f"ricevuta={x.shape[1]}."
             )
 
         if x.shape[2] != self.num_features:
             raise ValueError(
                 f"Feature attese={self.num_features}, "
-                f"ricevute={x.shape[2]}"
+                f"ricevute={x.shape[2]}."
             )
 
-        # (B, T, C) → (B, T, d_model)
-        embedded = self.embedding(x)
-        residual = embedded
+        # [B, T, C] -> [B, T, d_model]
+        features = self.embedding(x)
 
-        # (B, T, d_model) → (B, d_model, cycles, period)
-        periodic_2d = self._to_periodic_2d(embedded)
+        # Ripete il TimesBlock num_blocks volte.
+        for times_block in self.times_blocks:
+            features = times_block(
+                features
+            )
 
-        # Estrazione multi-scala intra/inter-periodo.
-        features_2d = self.inception_1(periodic_2d)
-        features_2d = self.activation(features_2d)
-        features_2d = self.dropout(features_2d)
-        features_2d = self.inception_2(features_2d)
-
-        # Ritorno allo spazio temporale 1D.
-        features_1d = self._to_temporal_1d(features_2d)
-
-        # Residual connection.
-        features_1d = self.normalization(
-            features_1d + residual
+        # [B, T, d_model]
+        # -> [B, d_model, T]
+        features = features.transpose(
+            1,
+            2,
         )
 
-        # La Linear temporale deve ricevere seq_len
-        # sull'ultima dimensione.
-        features_1d = features_1d.transpose(1, 2)
+        # [B, d_model, T]
+        # -> [B, d_model, H]
+        forecast = self.temporal_projection(
+            features
+        )
 
-        # (B, d_model, seq_len) → (B, d_model, pred_len)
-        forecast = self.temporal_projection(features_1d)
+        # [B, d_model, H]
+        # -> [B, H, d_model]
+        forecast = forecast.transpose(
+            1,
+            2,
+        )
 
-        # (B, d_model, pred_len) → (B, pred_len, d_model)
-        forecast = forecast.transpose(1, 2)
+        # [B, H, d_model]
+        # -> [B, H, num_features]
+        return self.output_projection(
+            forecast
+        )
 
-        # (B, pred_len, d_model) → (B, pred_len, num_features)
-        return self.output_projection(forecast)
 
+# ============================================================
+# SANITY CHECK
+# ============================================================
 
 if __name__ == "__main__":
     batch_size = 32
@@ -236,26 +455,45 @@ if __name__ == "__main__":
     pred_len = 24
     num_features = 7
 
-    model = FixedPeriodInception2D(
-        seq_len=seq_len,
-        pred_len=pred_len,
-        num_features=num_features,
-        period=24,
-    )
-
     dummy_input = torch.randn(
         batch_size,
         seq_len,
         num_features,
     )
 
-    output = model(dummy_input)
+    for num_blocks in (1, 2, 3):
+        model = FixedPeriodInception2D(
+            seq_len=seq_len,
+            pred_len=pred_len,
+            num_features=num_features,
+            period=24,
+            d_model=32,
+            d_ff=64,
+            kernel_sizes=(1, 3, 5),
+            dropout=0.1,
+            num_blocks=num_blocks,
+        )
 
-    print("Input:", dummy_input.shape)
-    print("Output:", output.shape)
+        output = model(
+            dummy_input
+        )
 
-    assert output.shape == (
-        batch_size,
-        pred_len,
-        num_features,
-    )
+        parameter_count = sum(
+            parameter.numel()
+            for parameter
+            in model.parameters()
+            if parameter.requires_grad
+        )
+
+        print(
+            f"num_blocks={num_blocks} | "
+            f"input={tuple(dummy_input.shape)} | "
+            f"output={tuple(output.shape)} | "
+            f"parameters={parameter_count:,}"
+        )
+
+        assert output.shape == (
+            batch_size,
+            pred_len,
+            num_features,
+        )
