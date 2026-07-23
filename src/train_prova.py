@@ -400,6 +400,10 @@ def instantiate_from_signature(
             config.get("dropout", 0.1)
         ),
 
+        "groups": int(
+            config.get("groups", 4)
+        ),
+
         # Convoluzioni
         "kernel_size": int(
             config.get("kernel_size", 3)
@@ -1341,7 +1345,33 @@ def run_experiment(
             if args.model == "timesnet"
             else None
         ),
+        "backbone_2d": getattr(
+            model,
+            "block_type",
+            None,
+        ),
 
+        "kernel_sizes": (
+            config.get("kernel_sizes")
+            if getattr(model, "block_type", None)
+            == "multiscale"
+            else None
+        ),
+
+        "kernel_size": (
+            config.get("kernel_size", 3)
+            if getattr(model, "block_type", None)
+            == "single_kernel"
+            else None
+        ),
+
+        "groups": (
+            config.get("groups", 4)
+            if getattr(model, "block_type", None)
+            == "group"
+            else None
+        ),
+        
         "device": str(device),
 
         "trainable_parameters": int(
