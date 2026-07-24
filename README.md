@@ -38,6 +38,15 @@ Addestrare `DLinear` con l'orizzonte di previsione lungo (`pred_len=96`):
 python -m src.train --config etth1_96 --model DLinear
 ```
 
+# realtivamente a InceptionBlock in models_light.py 
+
+| Blocco | Kernel utilizzati | Descrizione |
+|--------|-------------------|-------------|
+| `SingleKernelBlock2D` | 3×3 → 3×3 | Utilizza una sola dimensione di kernel (3×3) in due convoluzioni consecutive. |
+| `MultiKernelInception2D` | 1×1 + 3×3 + 5×5 (+ 1×1 mixer) | Utilizza più dimensioni di kernel in parallelo per catturare pattern a scale diverse. |
+
+
+
 # da fare
 
 1. Implementazione della classe `TimeSeriesDataset` per il dataset ETT in `src/data.py`, confinando l'operazione di *fit* dello scaler al solo training set per annullare il rischio di *data leakage*.
