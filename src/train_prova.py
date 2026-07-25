@@ -43,10 +43,10 @@ def parse_args():
         type=str,
         required=True,
         choices=[
-            "timesnet",
+            "timesnet_mod_2d",
             "fixed_period_inception",
             "timesnet_light",
-            "models_1d",
+            "timesnet_original"
             "dlinear",
             "tcn",
         ],
@@ -624,7 +624,7 @@ def build_model(
     # --------------------------------------------------------
     # TIMESNET ORIGINALE
     # --------------------------------------------------------
-    if model_name == "timesnet":
+    if model_name == "timesnet_mod_2d":
         from src.models_2d import TimesNet
 
         effective_top_k = (
@@ -679,7 +679,7 @@ def build_model(
     # FIXED PERIOD INCEPTION
     # --------------------------------------------------------
     if model_name == "fixed_period_inception":
-        from src.models.fixed_period_inception import (
+        from fixed_period_inception import (
             FixedPeriodInception2D,
         )
 
