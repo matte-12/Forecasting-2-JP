@@ -46,7 +46,7 @@ def parse_args():
             "timesnet_mod_2d",
             "fixed_period_inception",
             "timesnet_light",
-            "timesnet_original"
+            "timesnet_original",
             "dlinear",
             "tcn",
         ],
@@ -63,7 +63,7 @@ def parse_args():
             "Classe concreta da caricare. "
             "Esempi: LightTimesNetMultiScale, "
             "LightTimesNetDepthwise, "
-            "LightTimesNetGroup, "
+            "LightTimesNetGroup"
             "LightTimesNetSingleKernel, "
             "DLinear, CausalTCN."
         ),
