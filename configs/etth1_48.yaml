@@ -15,4 +15,3 @@ top_k: 3
 use_fft: true
 fixed_period: 24
 use_inception: true
-output_dir: experiments/etth1_24
