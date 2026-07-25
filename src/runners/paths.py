@@ -216,32 +216,67 @@ def resolve_csv_path(
     must_exist: bool = True,
 ) -> Path:
     """
-    Risolve un percorso CSV.
+    Risolve il percorso di un dataset CSV.
 
-    Un percorso relativo viene interpretato rispetto a DATA_ROOT.
+    Casi supportati:
+
+    1. Percorso assoluto:
+       /content/drive/MyDrive/.../ETTh1.csv
+
+    2. Percorso relativo:
+       ETT-small/ETTh1.csv
+
+    3. Percorso relativo storico:
+       data/ETT-small/ETTh1.csv
+
+    Se DATA_ROOT è definita, viene usata come radice.
+    Altrimenti viene usata <project_root>/data.
     """
 
     csv_path = Path(
         csv_path
     ).expanduser()
 
+    # Un percorso assoluto viene mantenuto.
     if csv_path.is_absolute():
-        result = csv_path.resolve()
+        resolved_path = csv_path.resolve()
+
     else:
-        result = (
+        path_parts = csv_path.parts
+
+        # Evita di ottenere:
+        #
+        # DATA_ROOT/data/ETT-small/ETTh1.csv
+        #
+        # quando lo YAML contiene già il prefisso "data/".
+        if (
+            path_parts
+            and path_parts[0].lower() == "data"
+        ):
+            csv_path = Path(
+                *path_parts[1:]
+            )
+
+        resolved_path = (
             get_data_root()
             / csv_path
         ).resolve()
 
-    if must_exist and not result.exists():
+    if (
+        must_exist
+        and not resolved_path.exists()
+    ):
         raise FileNotFoundError(
-            "Dataset non trovato:\n"
-            f"{result}\n\n"
-            "Controlla DATA_ROOT oppure csv_path."
+            "Dataset CSV non trovato.\n\n"
+            f"csv_path originale: {csv_path}\n"
+            f"DATA_ROOT: {get_data_root()}\n"
+            f"Percorso risolto: {resolved_path}\n\n"
+            "Controlla la struttura della cartella "
+            "dataset_forecast e il valore di csv_path "
+            "nel file YAML."
         )
 
-    return result
-
+    return resolved_path
 
 def get_comparison_directory(
     comparison_name: str | None = None,
