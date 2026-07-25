@@ -11,7 +11,7 @@ experiments/cicli/
 """
 
 from __future__ import annotations
-
+from src.runners.paths import get_experiments_root
 from src.runners.runner_utils import (
     build_train_command,
     find_config_files,
@@ -23,15 +23,15 @@ from src.runners.runner_utils import (
 )
 
 
-GROUP_NAME = "cicli"
+
 
 FIXED_PERIOD = 24
 NUM_TIMES_BLOCKS = 1
 
 
 def main() -> None:
-    output_dir = get_runner_output_dir(
-        GROUP_NAME
+    output_dir = get_experiments_root(
+        create=True
     )
 
     yaml_files = find_config_files()

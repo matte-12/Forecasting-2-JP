@@ -41,7 +41,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-
+from src.runners.paths import get_experiments_root
 from src.runners.runner_utils import (
     build_train_command,
     find_config_files,
@@ -57,10 +57,7 @@ from src.runners.runner_utils import (
 # CONFIGURAZIONE DEL RUNNER
 # ============================================================
 
-GROUP_NAME = (
-    "fixed_period_inception_"
-    "period_24_vs_48_vs_17"
-)
+
 
 FIXED_PERIODS = [
     24,
@@ -503,8 +500,8 @@ def experiment_is_completed(
 # ============================================================
 
 def main() -> None:
-    output_dir = get_runner_output_dir(
-        GROUP_NAME
+    output_dir = get_experiments_root(
+        create=True
     )
 
     yaml_files = find_config_files()

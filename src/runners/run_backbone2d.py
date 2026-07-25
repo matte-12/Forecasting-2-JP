@@ -7,6 +7,7 @@ experiments/backbone2d/
 """
 
 from __future__ import annotations
+from src.runners.paths import get_experiments_root
 
 from src.runners.runner_utils import (
     build_train_command,
@@ -18,7 +19,7 @@ from src.runners.runner_utils import (
 )
 
 
-GROUP_NAME = "backbone2d"
+# GROUP_NAME = "backbone2d"
 
 
 # Questi nomi devono corrispondere alle classi
@@ -32,8 +33,13 @@ BACKBONE_CLASSES = [
 
 
 def main() -> None:
-    output_dir = get_runner_output_dir(
+    """
+        output_dir = get_runner_output_dir(
         GROUP_NAME
+    )
+    """
+    output_dir = get_experiments_root(
+        create=True
     )
 
     yaml_files = find_config_files()

@@ -58,27 +58,12 @@ export DATA_ROOT="${
 # MACROCARTELLE
 # ============================================================
 
-CICLI_DIR="$EXPERIMENTS_ROOT/cicli"
-
-TIMES_BLOCK_DIR="$EXPERIMENTS_ROOT/times_block"
-
-BACKBONE2D_DIR="$EXPERIMENTS_ROOT/backbone2d"
-
-FIXED_PERIOD_DIR="$EXPERIMENTS_ROOT/fixed_period_inception_period24 vs 48 vs 17"
+RUNNERS_OUTPUT_DIR="$EXPERIMENTS_ROOT"
 
 LOG_DIR="$EXPERIMENTS_ROOT/logs"
 
-
-mkdir -p "$CICLI_DIR"
-
-mkdir -p "$TIMES_BLOCK_DIR"
-
-mkdir -p "$BACKBONE2D_DIR"
-
-mkdir -p "$FIXED_PERIOD_DIR"
-
+mkdir -p "$EXPERIMENTS_ROOT"
 mkdir -p "$LOG_DIR"
-
 
 # ============================================================
 # LOG

@@ -13,7 +13,7 @@ Output:
 
 experiments/times_block/
 """
-
+from src.runners.paths import get_experiments_root
 from __future__ import annotations
 
 from src.runners.runner_utils import (
@@ -27,7 +27,7 @@ from src.runners.runner_utils import (
 )
 
 
-GROUP_NAME = "times_block"
+
 
 TOP_K_VALUES = [
     1,
@@ -45,8 +45,8 @@ FIXED_PERIOD = 24
 
 
 def main() -> None:
-    output_dir = get_runner_output_dir(
-        GROUP_NAME
+    output_dir = get_experiments_root(
+        create=True
     )
 
     yaml_files = find_config_files()
