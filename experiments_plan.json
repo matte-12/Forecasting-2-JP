@@ -1,0 +1,20 @@
+{
+    "configs": [
+        "etth1_24", "etth1_48", "etth1_96",
+        "ettm1_24", "ettm1_48", "ettm1_96"
+    ],
+    "models": [
+        "DLinear",
+        "CausalTCN",
+        "TimesNetOriginal",
+        "FixedPeriodInception",
+        "LightTimesNet_MultiScale",
+        "LightTimesNet_Depthwise",
+        "LightTimesNet_Group",
+        "LightTimesNet_SingleKernel"
+    ],
+    "overrides": {
+        "periods": [24],
+        "top_k_values": [3]
+    }
+}
