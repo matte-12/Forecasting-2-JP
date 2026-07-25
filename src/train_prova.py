@@ -972,130 +972,199 @@ def create_experiment_directory(
     model_name: str,
     config_path: Path,
     model: nn.Module,
+    config: dict,
     top_k: Optional[int] = None,
     requested_class: Optional[str] = None,
     num_blocks: Optional[int] = None,
 ) -> Path:
+    """
+    Crea una cartella piatta e auto-descrittiva per ogni run.
+
+    Esempi:
+
+    fixed_period_inception_etth1_seq_96_pred_24_period_24_tb_1
+
+    timesnet_original_etth1_seq_96_pred_24_top_3_tb_2
+
+    timesnet_light_multiscale_etth1_seq_96_pred_24_period_24_tb_1
+
+    dlinear_etth1_seq_96_pred_24
+    """
+
     experiments_root = get_experiments_root()
 
-    config_name = sanitize_name(
-        config_path.stem
+    dataset_name = sanitize_name(
+        str(
+            config.get(
+                "dataset_name",
+                config_path.stem,
+            )
+        ).lower()
     )
 
-    # --------------------------------------------------------
-    # TIMESNET ORIGINAL: top_k × num_times_blocks
-    # --------------------------------------------------------
-    if model_name == "timesnet_original":
-        if top_k is None:
-            raise ValueError(
-                "top_k è obbligatorio per timesnet_original."
-            )
+    seq_len = int(
+        config["seq_len"]
+    )
 
+    pred_len = int(
+        config["pred_len"]
+    )
+
+    effective_num_blocks = get_model_num_blocks(
+        model
+    )
+
+    if effective_num_blocks is None:
         effective_num_blocks = (
-            get_model_num_blocks(
-                model
-            )
+            int(num_blocks)
+            if num_blocks is not None
+            else None
         )
 
-        if effective_num_blocks is None:
-            effective_num_blocks = int(
-                num_blocks
-                if num_blocks is not None
-                else 1
-            )
+    effective_period = get_model_fixed_period(
+        model
+    )
 
-        experiment_directory = (
-            experiments_root
-            / f"timesnet_original_{config_name}"
-            / f"top_k_{int(top_k)}"
-            / (
-                "num_times_blocks_"
-                f"{int(effective_num_blocks)}"
-            )
-        )
+    effective_top_k = get_model_top_k(
+        model
+    )
 
-    # --------------------------------------------------------
-    # VECCHIA TIMESNET models_2d
-    # --------------------------------------------------------
-    elif model_name == "timesnet_mod_2d":
-        if top_k is None:
-            raise ValueError(
-                "top_k è obbligatorio per timesnet_mod_2d."
-            )
+    if effective_top_k is None and top_k is not None:
+        effective_top_k = int(top_k)
 
-        experiment_directory = (
-            experiments_root
-            / f"timesnet_mod_2d_{config_name}"
-            / f"top_k_{int(top_k)}"
-        )
+    name_parts = [
+        sanitize_name(
+            model_name.lower()
+        ),
+    ]
 
-    # --------------------------------------------------------
-    # FIXED PERIOD
-    # --------------------------------------------------------
-    elif model_name == "fixed_period_inception":
-        fixed_period = get_model_fixed_period(
-            model
-        )
-
-        if fixed_period is None:
-            raise ValueError(
-                "Impossibile determinare il periodo fisso."
-            )
-
-        effective_num_blocks = (
-            get_model_num_blocks(
-                model
-            )
-        )
-
-        if effective_num_blocks is None:
-            effective_num_blocks = int(
-                num_blocks
-                if num_blocks is not None
-                else 1
-            )
-
-        experiment_directory = (
-            experiments_root
-            / (
-                "fixed_period_inception_timesblocks_"
-                f"{config_name}"
-            )
-            / f"period_{int(fixed_period)}"
-            / (
-                "num_times_blocks_"
-                f"{int(effective_num_blocks)}"
-            )
-        )
-
-    # --------------------------------------------------------
-    # ALTRI MODELLI
-    # --------------------------------------------------------
-    else:
+    # Per timesnet_light inserisce anche il nome del backbone.
+    if model_name == "timesnet_light":
         class_name = (
             requested_class
             if requested_class is not None
             else model.__class__.__name__
         )
 
-        experiment_directory = (
-            experiments_root
-            / (
-                f"{sanitize_name(model_name)}_"
-                f"{sanitize_name(class_name)}_"
-                f"{config_name}"
+        normalized_class_name = (
+            str(class_name)
+            .replace("LightTimesNet", "")
+            .strip("_")
+            .lower()
+        )
+
+        if not normalized_class_name:
+            normalized_class_name = "base"
+
+        name_parts.append(
+            sanitize_name(
+                normalized_class_name
             )
         )
 
-        fixed_period = get_model_fixed_period(
-            model
+    name_parts.extend(
+        [
+            dataset_name,
+            "seq",
+            str(seq_len),
+            "pred",
+            str(pred_len),
+        ]
+    )
+
+    if model_name == "timesnet_original":
+        if effective_top_k is None:
+            raise ValueError(
+                "Impossibile determinare top_k "
+                "per TimesNetOriginal."
+            )
+
+        name_parts.extend(
+            [
+                "top",
+                str(effective_top_k),
+            ]
         )
 
-        if fixed_period is not None:
-            experiment_directory = (
-                experiment_directory
-                / f"period_{int(fixed_period)}"
+        if effective_num_blocks is not None:
+            name_parts.extend(
+                [
+                    "tb",
+                    str(
+                        effective_num_blocks
+                    ),
+                ]
             )
+
+    elif model_name == "fixed_period_inception":
+        if effective_period is None:
+            raise ValueError(
+                "Impossibile determinare fixed_period."
+            )
+
+        name_parts.extend(
+            [
+                "period",
+                str(effective_period),
+            ]
+        )
+
+        if effective_num_blocks is not None:
+            name_parts.extend(
+                [
+                    "tb",
+                    str(
+                        effective_num_blocks
+                    ),
+                ]
+            )
+
+    elif model_name == "timesnet_light":
+        if effective_period is not None:
+            name_parts.extend(
+                [
+                    "period",
+                    str(effective_period),
+                ]
+            )
+
+        if effective_num_blocks is not None:
+            name_parts.extend(
+                [
+                    "tb",
+                    str(
+                        effective_num_blocks
+                    ),
+                ]
+            )
+
+    elif model_name == "timesnet_mod_2d":
+        if effective_top_k is not None:
+            name_parts.extend(
+                [
+                    "top",
+                    str(effective_top_k),
+                ]
+            )
+
+        if effective_num_blocks is not None:
+            name_parts.extend(
+                [
+                    "tb",
+                    str(
+                        effective_num_blocks
+                    ),
+                ]
+            )
+
+    experiment_name = "_".join(
+        name_parts
+    )
+
+    experiment_directory = (
+        experiments_root
+        / experiment_name
+    )
 
     experiment_directory.mkdir(
         parents=True,
@@ -1416,6 +1485,7 @@ def run_experiment(
         create_experiment_directory(
             model_name=args.model,
             config_path=config_path,
+            config=config,
             model=model,
             top_k=top_k,
             requested_class=args.model_class,
