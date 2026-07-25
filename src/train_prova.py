@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 import argparse
 import importlib
 import inspect
 import json
+import math
 import os
 import random
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -21,7 +24,7 @@ from src.data import build_dataloader
 # ARGOMENTI DA TERMINALE
 # ============================================================
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Training e confronto di modelli per forecasting."
@@ -44,15 +47,13 @@ def parse_args():
         required=True,
         choices=[
             "timesnet_mod_2d",
+            "timesnet_original",
             "fixed_period_inception",
             "timesnet_light",
-            "timesnet_original",
             "dlinear",
             "tcn",
         ],
-        help=(
-            "Famiglia di modello da allenare."
-        ),
+        help="Famiglia di modello da allenare.",
     )
 
     parser.add_argument(
@@ -60,12 +61,11 @@ def parse_args():
         type=str,
         default=None,
         help=(
-            "Classe concreta da caricare. "
+            "Classe concreta per timesnet_light. "
             "Esempi: LightTimesNetMultiScale, "
             "LightTimesNetDepthwise, "
-            "LightTimesNetGroup"
-            "LightTimesNetSingleKernel, "
-            "DLinear, CausalTCN."
+            "LightTimesNetGroup, "
+            "LightTimesNetSingleKernel."
         ),
     )
 
@@ -73,10 +73,10 @@ def parse_args():
         "--top-k-values",
         type=int,
         nargs="+",
-        default=[1, 2, 3, 4, 5],
+        default=None,
         help=(
-            "Valori di top_k da provare con TimesNet. "
-            "Default: 1 2 3 4 5."
+            "Valori top_k da provare con TimesNet. "
+            "Se omesso, usa top_k dello YAML oppure 3."
         ),
     )
 
@@ -84,11 +84,11 @@ def parse_args():
         "--num-blocks-values",
         type=int,
         nargs="+",
-        default=[1, 2, 3],
+        default=None,
         help=(
             "Numero di TimesBlock da provare con "
-            "fixed_period_inception. "
-            "Default: 1 2 3."
+            "timesnet_original o fixed_period_inception. "
+            "Se omesso, usa il valore dello YAML oppure 1."
         ),
     )
 
@@ -99,6 +99,10 @@ def parse_args():
 # CONFIGURAZIONE YAML
 # ============================================================
 
+def get_project_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
 def resolve_config_path(
     config_argument: str,
 ) -> Path:
@@ -106,9 +110,7 @@ def resolve_config_path(
         config_argument
     ).expanduser()
 
-    project_root = (
-        Path(__file__).resolve().parent.parent
-    )
+    project_root = get_project_root()
 
     if config_path.suffix == "":
         config_path = (
@@ -123,9 +125,11 @@ def resolve_config_path(
             / config_path
         )
 
+    config_path = config_path.resolve()
+
     if not config_path.exists():
         raise FileNotFoundError(
-            "Configurazione non trovata: "
+            "Configurazione non trovata:\n"
             f"{config_path}"
         )
 
@@ -147,7 +151,7 @@ def load_config(
 
     if not isinstance(config, dict):
         raise ValueError(
-            "Configurazione YAML non valida: "
+            "Configurazione YAML non valida:\n"
             f"{config_path}"
         )
 
@@ -196,46 +200,6 @@ def validate_config(
                 f"{key} deve essere positivo."
             )
 
-    if "groups" in config:
-        if int(config["groups"]) <= 0:
-            raise ValueError(
-                "groups deve essere positivo."
-            )
-
-    if "kernel_size" in config:
-        if int(config["kernel_size"]) <= 0:
-            raise ValueError(
-                "kernel_size deve essere positivo."
-            )
-
-    if "num_channels" in config:
-        num_channels = config[
-            "num_channels"
-        ]
-
-        if not isinstance(
-            num_channels,
-            (list, tuple),
-        ):
-            raise TypeError(
-                "num_channels deve essere una lista, "
-                "per esempio [32, 64]."
-            )
-
-        if not num_channels:
-            raise ValueError(
-                "num_channels non può essere vuoto."
-            )
-
-        if any(
-            int(channel) <= 0
-            for channel in num_channels
-        ):
-            raise ValueError(
-                "num_channels deve contenere "
-                "soltanto valori positivi."
-            )
-
 
 # ============================================================
 # SEED E DEVICE
@@ -276,6 +240,64 @@ def synchronize_device(
 
 
 # ============================================================
+# SERIALIZZAZIONE JSON ROBUSTA
+# ============================================================
+
+def make_json_serializable(
+    value: Any,
+) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): make_json_serializable(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, (list, tuple, set)):
+        return [
+            make_json_serializable(item)
+            for item in value
+        ]
+
+    if isinstance(value, Path):
+        return str(value)
+
+    if isinstance(value, np.ndarray):
+        return make_json_serializable(
+            value.tolist()
+        )
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    if torch.is_tensor(value):
+        if value.numel() == 1:
+            return value.item()
+
+        return value.detach().cpu().tolist()
+
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+
+    return value
+
+
+def save_json(
+    path: Path,
+    content: Any,
+) -> None:
+    with path.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            make_json_serializable(content),
+            file,
+            indent=4,
+        )
+
+
+# ============================================================
 # CARICAMENTO DINAMICO DELLE CLASSI
 # ============================================================
 
@@ -306,69 +328,40 @@ def find_model_class(
         module_path
     )
 
-    available_names = (
-        list_module_model_classes(
-            module
-        )
+    available_names = list_module_model_classes(
+        module
     )
 
     if requested_class is not None:
-        if not hasattr(
-            module,
-            requested_class,
-        ):
+        if requested_class not in available_names:
             raise AttributeError(
-                f"La classe '{requested_class}' "
-                f"non è presente in {module_path}. "
-                f"Classi disponibili: "
-                f"{available_names}"
+                f"La classe '{requested_class}' non è "
+                f"presente in {module_path}. "
+                f"Classi disponibili: {available_names}"
             )
 
-        model_class = getattr(
+        return getattr(
             module,
             requested_class,
         )
 
-        if not inspect.isclass(
-            model_class
-        ):
-            raise TypeError(
-                f"{requested_class} non è una classe."
-            )
-
-        if not issubclass(
-            model_class,
-            nn.Module,
-        ):
-            raise TypeError(
-                f"{requested_class} non è "
-                "una sottoclasse di nn.Module."
-            )
-
-        return model_class
-
-    for class_name in (
-        preferred_classes or []
-    ):
+    for class_name in preferred_classes or []:
         if class_name in available_names:
             return getattr(
                 module,
                 class_name,
             )
 
-    available_classes = [
-        getattr(module, name)
-        for name in available_names
-    ]
-
-    if len(available_classes) == 1:
-        return available_classes[0]
+    if len(available_names) == 1:
+        return getattr(
+            module,
+            available_names[0],
+        )
 
     raise ValueError(
-        "Non è possibile scegliere automaticamente "
-        f"una classe da {module_path}. "
-        f"Classi disponibili: {available_names}. "
-        "Usa --model-class NOME_CLASSE."
+        f"Non posso scegliere automaticamente una classe "
+        f"da {module_path}. "
+        f"Classi disponibili: {available_names}."
     )
 
 
@@ -380,7 +373,23 @@ def instantiate_from_signature(
     model_class,
     config: dict,
     top_k: Optional[int] = None,
+    num_blocks: Optional[int] = None,
 ) -> nn.Module:
+    """
+    Passa al modello soltanto gli argomenti presenti
+    nella firma del suo __init__.
+
+    Gestisce nomi alternativi come:
+        num_blocks
+        num_times_blocks
+        e_layers
+
+    e:
+        num_features
+        enc_in
+        c_in
+    """
+
     seq_len = int(
         config["seq_len"]
     )
@@ -393,27 +402,37 @@ def instantiate_from_signature(
         config["num_features"]
     )
 
-    effective_top_k = (
-        int(top_k)
+    effective_top_k = int(
+        top_k
         if top_k is not None
-        else int(
-            config.get(
-                "top_k",
-                3,
-            )
+        else config.get(
+            "top_k",
+            3,
         )
     )
 
-    num_channels = [
-        int(channel)
-        for channel in config.get(
-            "num_channels",
-            [32, 64],
+    effective_num_blocks = int(
+        num_blocks
+        if num_blocks is not None
+        else config.get(
+            "num_times_blocks",
+            config.get(
+                "num_blocks",
+                config.get(
+                    "e_layers",
+                    1,
+                ),
+            ),
         )
-    ]
+    )
+
+    patience_value = config.get(
+        "patience",
+        5,
+    )
 
     candidate_kwargs = {
-        # Lunghezza input
+        # Lunghezza della sequenza
         "seq_len": seq_len,
         "input_len": seq_len,
         "context_len": seq_len,
@@ -425,19 +444,19 @@ def instantiate_from_signature(
         "horizon": pred_len,
         "forecast_horizon": pred_len,
 
-        # Feature input
-        "enc_in": num_features,
+        # Numero di feature
         "num_features": num_features,
+        "enc_in": num_features,
+        "c_in": num_features,
         "input_size": num_features,
         "input_dim": num_features,
         "n_features": num_features,
-        "c_in": num_features,
         "in_channels": num_features,
 
-        # Feature output
+        # Output
+        "c_out": num_features,
         "output_size": num_features,
         "output_dim": num_features,
-        "c_out": num_features,
         "out_channels": num_features,
 
         # Dimensioni interne
@@ -471,15 +490,13 @@ def instantiate_from_signature(
                 ),
             )
         ),
-        "num_layers": int(
-            config.get(
-                "num_layers",
-                1,
-            )
-        ),
 
-        # TCN
-        "num_channels": num_channels,
+        # TimesNet
+        "top_k": effective_top_k,
+        "k": effective_top_k,
+        "num_blocks": effective_num_blocks,
+        "num_times_blocks": effective_num_blocks,
+        "e_layers": effective_num_blocks,
 
         # Periodicità
         "fixed_period": int(
@@ -494,7 +511,47 @@ def instantiate_from_signature(
                 24,
             )
         ),
-        "top_k": effective_top_k,
+
+        # Inception
+        "kernel_sizes": tuple(
+            int(kernel)
+            for kernel in config.get(
+                "kernel_sizes",
+                [1, 3, 5],
+            )
+        ),
+        "num_kernels": int(
+            config.get(
+                "num_kernels",
+                len(
+                    config.get(
+                        "kernel_sizes",
+                        [1, 3, 5],
+                    )
+                ),
+            )
+        ),
+
+        # TCN / convoluzioni
+        "kernel_size": int(
+            config.get(
+                "kernel_size",
+                3,
+            )
+        ),
+        "num_channels": [
+            int(channel)
+            for channel in config.get(
+                "num_channels",
+                [32, 64],
+            )
+        ],
+        "groups": int(
+            config.get(
+                "groups",
+                4,
+            )
+        ),
 
         # Regolarizzazione
         "dropout": float(
@@ -504,28 +561,7 @@ def instantiate_from_signature(
             )
         ),
 
-        # Convoluzioni
-        "kernel_size": int(
-            config.get(
-                "kernel_size",
-                3,
-            )
-        ),
-        "kernel_sizes": tuple(
-            int(kernel)
-            for kernel in config.get(
-                "kernel_sizes",
-                [1, 3, 5],
-            )
-        ),
-        "groups": int(
-            config.get(
-                "groups",
-                4,
-            )
-        ),
-
-        # TimesNet
+        # Eventuali opzioni legacy
         "use_fft": bool(
             config.get(
                 "use_fft",
@@ -537,6 +573,13 @@ def instantiate_from_signature(
                 "use_inception",
                 True,
             )
+        ),
+
+        # Informativo, usato soltanto se accettato
+        "patience": (
+            5
+            if patience_value is None
+            else int(patience_value)
         ),
     }
 
@@ -551,16 +594,14 @@ def instantiate_from_signature(
         in signature.parameters.values()
     )
 
-    accepted_kwargs = {}
-
-    for name, value in (
-        candidate_kwargs.items()
-    ):
+    accepted_kwargs = {
+        name: value
+        for name, value in candidate_kwargs.items()
         if (
             accepts_kwargs
             or name in signature.parameters
-        ):
-            accepted_kwargs[name] = value
+        )
+    }
 
     missing_required = []
 
@@ -587,9 +628,10 @@ def instantiate_from_signature(
     if missing_required:
         raise TypeError(
             f"Impossibile costruire "
-            f"{model_class.__name__}. "
+            f"{model_class.__module__}."
+            f"{model_class.__name__}.\n"
             f"Argomenti obbligatori non riconosciuti: "
-            f"{missing_required}. "
+            f"{missing_required}\n"
             f"Firma: {signature}"
         )
 
@@ -600,7 +642,7 @@ def instantiate_from_signature(
     )
 
     print(
-        "Argomenti passati al modello:",
+        "Argomenti passati:",
         accepted_kwargs,
     )
 
@@ -622,124 +664,73 @@ def build_model(
 ) -> nn.Module:
 
     # --------------------------------------------------------
-    # TIMESNET ORIGINALE
+    # VECCHIA TIMESNET DI models_2d.py
     # --------------------------------------------------------
     if model_name == "timesnet_mod_2d":
-        from src.models_2d import TimesNet
-
-        effective_top_k = (
-            int(top_k)
-            if top_k is not None
-            else int(
-                config.get(
-                    "top_k",
-                    3,
-                )
-            )
+        model_class = find_model_class(
+            module_path="src.models_2d",
+            preferred_classes=[
+                "TimesNet",
+            ],
         )
 
-        return TimesNet(
-            seq_len=int(
-                config["seq_len"]
-            ),
-            pred_len=int(
-                config["pred_len"]
-            ),
-            enc_in=int(
-                config["num_features"]
-            ),
-            d_model=int(
-                config.get(
-                    "d_model",
-                    32,
-                )
-            ),
-            top_k=effective_top_k,
-            use_fft=bool(
-                config.get(
-                    "use_fft",
-                    True,
-                )
-            ),
-            fixed_period=int(
-                config.get(
-                    "fixed_period",
-                    24,
-                )
-            ),
-            use_inception=bool(
-                config.get(
-                    "use_inception",
-                    True,
-                )
-            ),
+        return instantiate_from_signature(
+            model_class=model_class,
+            config=config,
+            top_k=top_k,
+            num_blocks=num_blocks,
+        )
+
+    # --------------------------------------------------------
+    # TIMESNET ORIGINAL
+    # File: src/timesnet_original.py
+    # --------------------------------------------------------
+    if model_name == "timesnet_original":
+        if requested_class is not None:
+            raise ValueError(
+                "--model-class non deve essere usato "
+                "con --model timesnet_original."
+            )
+
+        model_class = find_model_class(
+            module_path="src.timesnet_original",
+            preferred_classes=[
+                "TimesNetOriginal",
+                "TimesNet",
+                "Model",
+            ],
+        )
+
+        return instantiate_from_signature(
+            model_class=model_class,
+            config=config,
+            top_k=top_k,
+            num_blocks=num_blocks,
         )
 
     # --------------------------------------------------------
     # FIXED PERIOD INCEPTION
+    # File: src/fixed_period_inception.py
     # --------------------------------------------------------
     if model_name == "fixed_period_inception":
-        from fixed_period_inception import (
-            FixedPeriodInception2D,
+        model_class = find_model_class(
+            module_path="src.fixed_period_inception",
+            preferred_classes=[
+                "FixedPeriodInception2D",
+                "FixedPeriodInception",
+            ],
         )
 
-        effective_num_blocks = (
-            int(num_blocks)
-            if num_blocks is not None
-            else int(
-                config.get(
-                    "num_blocks",
-                    1,
-                )
-            )
-        )
-
-        return FixedPeriodInception2D(
-            seq_len=int(
-                config["seq_len"]
-            ),
-            pred_len=int(
-                config["pred_len"]
-            ),
-            num_features=int(
-                config["num_features"]
-            ),
-            period=int(
-                config.get(
-                    "fixed_period",
-                    24,
-                )
-            ),
-            d_model=int(
-                config.get(
-                    "d_model",
-                    32,
-                )
-            ),
-            d_ff=int(
-                config.get(
-                    "d_ff",
-                    64,
-                )
-            ),
-            kernel_sizes=tuple(
-                int(kernel)
-                for kernel in config.get(
-                    "kernel_sizes",
-                    [1, 3, 5],
-                )
-            ),
-            dropout=float(
-                config.get(
-                    "dropout",
-                    0.1,
-                )
-            ),
-            num_blocks=effective_num_blocks,
+        return instantiate_from_signature(
+            model_class=model_class,
+            config=config,
+            top_k=None,
+            num_blocks=num_blocks,
         )
 
     # --------------------------------------------------------
     # TIMESNET LIGHT
+    # File: src/models_light.py
     # --------------------------------------------------------
     if model_name == "timesnet_light":
         allowed_light_classes = {
@@ -750,11 +741,13 @@ def build_model(
             "LightTimesNetSingleKernel",
         }
 
-        if (
-            requested_class is not None
-            and requested_class
-            not in allowed_light_classes
-        ):
+        if requested_class is None:
+            raise ValueError(
+                "Per --model timesnet_light devi specificare "
+                "--model-class."
+            )
+
+        if requested_class not in allowed_light_classes:
             raise ValueError(
                 "Classe TimesNet Light non supportata: "
                 f"{requested_class}. "
@@ -765,31 +758,17 @@ def build_model(
         model_class = find_model_class(
             module_path="src.models_light",
             requested_class=requested_class,
-            preferred_classes=[
-                "LightTimesNetMultiScale",
-                "LightTimesNet",
-            ],
         )
 
         return instantiate_from_signature(
             model_class=model_class,
             config=config,
-            top_k=None,
         )
 
     # --------------------------------------------------------
     # DLINEAR
     # --------------------------------------------------------
     if model_name == "dlinear":
-        if (
-            requested_class is not None
-            and requested_class != "DLinear"
-        ):
-            raise ValueError(
-                "Con --model dlinear la classe "
-                "deve essere DLinear."
-            )
-
         model_class = find_model_class(
             module_path="src.models_1d",
             requested_class="DLinear",
@@ -801,18 +780,9 @@ def build_model(
         )
 
     # --------------------------------------------------------
-    # TCN
+    # CAUSAL TCN
     # --------------------------------------------------------
     if model_name == "tcn":
-        if (
-            requested_class is not None
-            and requested_class != "CausalTCN"
-        ):
-            raise ValueError(
-                "Con --model tcn la classe "
-                "deve essere CausalTCN."
-            )
-
         model_class = find_model_class(
             module_path="src.models_1d",
             requested_class="CausalTCN",
@@ -823,73 +793,46 @@ def build_model(
             config=config,
         )
 
-    # --------------------------------------------------------
-    # MODELLI 1D GENERICI
-    # --------------------------------------------------------
-    if model_name == "models_1d":
-        allowed_1d_classes = {
-            "DLinear",
-            "CausalTCN",
-        }
-
-        if requested_class is None:
-            raise ValueError(
-                "Con --model models_1d devi specificare "
-                "--model-class DLinear oppure "
-                "--model-class CausalTCN."
-            )
-
-        if requested_class not in allowed_1d_classes:
-            raise ValueError(
-                f"Classe 1D non supportata: "
-                f"{requested_class}. "
-                f"Classi disponibili: "
-                f"{sorted(allowed_1d_classes)}"
-            )
-
-        model_class = find_model_class(
-            module_path="src.models_1d",
-            requested_class=requested_class,
-        )
-
-        return instantiate_from_signature(
-            model_class=model_class,
-            config=config,
-        )
-
     raise ValueError(
-        f"Modello non riconosciuto: "
-        f"{model_name}"
+        f"Modello non riconosciuto: {model_name}"
     )
 
 
 # ============================================================
-# INFORMAZIONI MODELLO
+# INFORMAZIONI DEL MODELLO
 # ============================================================
 
 def get_model_fixed_period(
     model: nn.Module,
 ) -> Optional[int]:
-    if hasattr(model, "period"):
-        return int(
-            model.period
-        )
-
-    if hasattr(model, "fixed_period"):
-        return int(
-            model.fixed_period
-        )
-
-    if (
-        hasattr(model, "times_block")
-        and hasattr(
-            model.times_block,
-            "fixed_period",
-        )
+    for attribute in (
+        "period",
+        "fixed_period",
     ):
-        return int(
-            model.times_block.fixed_period
-        )
+        if hasattr(model, attribute):
+            value = getattr(
+                model,
+                attribute,
+            )
+
+            if value is not None:
+                return int(value)
+
+    if hasattr(model, "times_block"):
+        for attribute in (
+            "period",
+            "fixed_period",
+        ):
+            if hasattr(
+                model.times_block,
+                attribute,
+            ):
+                return int(
+                    getattr(
+                        model.times_block,
+                        attribute,
+                    )
+                )
 
     return None
 
@@ -897,18 +840,55 @@ def get_model_fixed_period(
 def get_model_num_blocks(
     model: nn.Module,
 ) -> Optional[int]:
-    if hasattr(model, "num_blocks"):
-        return int(
-            model.num_blocks
-        )
-
-    if hasattr(model, "times_blocks"):
-        try:
-            return int(
-                len(model.times_blocks)
+    for attribute in (
+        "num_times_blocks",
+        "num_blocks",
+        "e_layers",
+    ):
+        if hasattr(model, attribute):
+            value = getattr(
+                model,
+                attribute,
             )
-        except TypeError:
-            return None
+
+            if value is not None:
+                return int(value)
+
+    for attribute in (
+        "times_blocks",
+        "blocks",
+        "model",
+    ):
+        if hasattr(model, attribute):
+            value = getattr(
+                model,
+                attribute,
+            )
+
+            if isinstance(
+                value,
+                nn.ModuleList,
+            ):
+                return len(value)
+
+    return None
+
+
+def get_model_top_k(
+    model: nn.Module,
+) -> Optional[int]:
+    for attribute in (
+        "top_k",
+        "k",
+    ):
+        if hasattr(model, attribute):
+            value = getattr(
+                model,
+                attribute,
+            )
+
+            if value is not None:
+                return int(value)
 
     return None
 
@@ -916,30 +896,45 @@ def get_model_num_blocks(
 def get_model_block_type(
     model: nn.Module,
 ) -> Optional[str]:
-    if hasattr(model, "block_type"):
-        return str(
-            model.block_type
-        )
-
-    if (
-        hasattr(model, "times_block")
-        and hasattr(
-            model.times_block,
-            "block_type",
-        )
+    for attribute in (
+        "block_type",
+        "backbone_2d",
+        "block_name",
     ):
-        return str(
-            model.times_block.block_type
-        )
+        if hasattr(model, attribute):
+            value = getattr(
+                model,
+                attribute,
+            )
+
+            if value is not None:
+                return str(value)
+
+    if hasattr(model, "times_block"):
+        for attribute in (
+            "block_type",
+            "backbone_2d",
+            "block_name",
+        ):
+            if hasattr(
+                model.times_block,
+                attribute,
+            ):
+                return str(
+                    getattr(
+                        model.times_block,
+                        attribute,
+                    )
+                )
 
     return None
 
 
 def sanitize_name(
-    name: str,
+    value: str,
 ) -> str:
     return (
-        str(name)
+        str(value)
         .strip()
         .replace(" ", "_")
         .replace("/", "_")
@@ -948,29 +943,30 @@ def sanitize_name(
     )
 
 
-def get_experiment_model_name(
-    model_name: str,
-    requested_class: Optional[str],
-    model: nn.Module,
-) -> str:
-    if model_name == "timesnet":
-        return "timesnet"
-
-    class_name = (
-        requested_class
-        if requested_class is not None
-        else model.__class__.__name__
-    )
-
-    return (
-        f"{sanitize_name(model_name)}_"
-        f"{sanitize_name(class_name)}"
-    )
-
-
 # ============================================================
 # DIRECTORY ESPERIMENTI
 # ============================================================
+
+def get_experiments_root() -> Path:
+    project_root = get_project_root()
+
+    experiments_root = Path(
+        os.environ.get(
+            "EXPERIMENTS_DIR",
+            os.environ.get(
+                "EXPERIMENTS_ROOT",
+                project_root / "experiments",
+            ),
+        )
+    ).expanduser().resolve()
+
+    experiments_root.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    return experiments_root
+
 
 def create_experiment_directory(
     model_name: str,
@@ -980,51 +976,19 @@ def create_experiment_directory(
     requested_class: Optional[str] = None,
     num_blocks: Optional[int] = None,
 ) -> Path:
-    project_root = (
-        Path(__file__).resolve().parent.parent
-    )
-
-    experiments_root = Path(
-        os.environ.get(
-            "EXPERIMENTS_DIR",
-            project_root / "experiments",
-        )
-    )
+    experiments_root = get_experiments_root()
 
     config_name = sanitize_name(
         config_path.stem
     )
 
     # --------------------------------------------------------
-    # TIMESNET TOP-K
+    # TIMESNET ORIGINAL: top_k × num_times_blocks
     # --------------------------------------------------------
-    if model_name == "timesnet":
+    if model_name == "timesnet_original":
         if top_k is None:
             raise ValueError(
-                "top_k deve essere specificato "
-                "per TimesNet."
-            )
-
-        experiment_directory = (
-            experiments_root
-            / f"timesnet_{config_name}"
-            / f"top_k_{int(top_k)}"
-        )
-
-    # --------------------------------------------------------
-    # FIXED PERIOD: STUDIO NUMERO TIMESBLOCK
-    # --------------------------------------------------------
-    elif model_name == "fixed_period_inception":
-        fixed_period = (
-            get_model_fixed_period(
-                model
-            )
-        )
-
-        if fixed_period is None:
-            raise ValueError(
-                "Impossibile determinare fixed_period "
-                "per FixedPeriodInception2D."
+                "top_k è obbligatorio per timesnet_original."
             )
 
         effective_num_blocks = (
@@ -1034,8 +998,59 @@ def create_experiment_directory(
         )
 
         if effective_num_blocks is None:
-            effective_num_blocks = (
-                int(num_blocks)
+            effective_num_blocks = int(
+                num_blocks
+                if num_blocks is not None
+                else 1
+            )
+
+        experiment_directory = (
+            experiments_root
+            / f"timesnet_original_{config_name}"
+            / f"top_k_{int(top_k)}"
+            / (
+                "num_times_blocks_"
+                f"{int(effective_num_blocks)}"
+            )
+        )
+
+    # --------------------------------------------------------
+    # VECCHIA TIMESNET models_2d
+    # --------------------------------------------------------
+    elif model_name == "timesnet_mod_2d":
+        if top_k is None:
+            raise ValueError(
+                "top_k è obbligatorio per timesnet_mod_2d."
+            )
+
+        experiment_directory = (
+            experiments_root
+            / f"timesnet_mod_2d_{config_name}"
+            / f"top_k_{int(top_k)}"
+        )
+
+    # --------------------------------------------------------
+    # FIXED PERIOD
+    # --------------------------------------------------------
+    elif model_name == "fixed_period_inception":
+        fixed_period = get_model_fixed_period(
+            model
+        )
+
+        if fixed_period is None:
+            raise ValueError(
+                "Impossibile determinare il periodo fisso."
+            )
+
+        effective_num_blocks = (
+            get_model_num_blocks(
+                model
+            )
+        )
+
+        if effective_num_blocks is None:
+            effective_num_blocks = int(
+                num_blocks
                 if num_blocks is not None
                 else 1
             )
@@ -1057,36 +1072,29 @@ def create_experiment_directory(
     # ALTRI MODELLI
     # --------------------------------------------------------
     else:
-        experiment_model_name = (
-            get_experiment_model_name(
-                model_name=model_name,
-                requested_class=requested_class,
-                model=model,
-            )
+        class_name = (
+            requested_class
+            if requested_class is not None
+            else model.__class__.__name__
         )
 
-        base_directory = (
+        experiment_directory = (
             experiments_root
             / (
-                f"{experiment_model_name}_"
+                f"{sanitize_name(model_name)}_"
+                f"{sanitize_name(class_name)}_"
                 f"{config_name}"
             )
         )
 
-        fixed_period = (
-            get_model_fixed_period(
-                model
-            )
+        fixed_period = get_model_fixed_period(
+            model
         )
 
         if fixed_period is not None:
             experiment_directory = (
-                base_directory
+                experiment_directory
                 / f"period_{int(fixed_period)}"
-            )
-        else:
-            experiment_directory = (
-                base_directory
             )
 
     experiment_directory.mkdir(
@@ -1108,9 +1116,7 @@ def run_epoch(
     device: torch.device,
     optimizer=None,
 ) -> float:
-    is_training = (
-        optimizer is not None
-    )
+    is_training = optimizer is not None
 
     if is_training:
         model.train()
@@ -1173,7 +1179,7 @@ def run_epoch(
                 if gradient_clip is not None:
                     torch.nn.utils.clip_grad_norm_(
                         model.parameters(),
-                        gradient_clip,
+                        float(gradient_clip),
                     )
 
                 optimizer.step()
@@ -1192,10 +1198,7 @@ def run_epoch(
             "Il DataLoader non contiene campioni."
         )
 
-    return (
-        total_loss
-        / total_samples
-    )
+    return total_loss / total_samples
 
 
 # ============================================================
@@ -1236,10 +1239,7 @@ def evaluate_test(
                     f"target={batch_y.shape}."
                 )
 
-            error = (
-                predictions
-                - batch_y
-            )
+            error = predictions - batch_y
 
             squared_error_sum += (
                 error.pow(2)
@@ -1253,30 +1253,21 @@ def evaluate_test(
                 .item()
             )
 
-            element_count += (
-                batch_y.numel()
-            )
+            element_count += batch_y.numel()
 
     if element_count == 0:
         raise RuntimeError(
             "Il test DataLoader non contiene elementi."
         )
 
-    mse = (
-        squared_error_sum
-        / element_count
+    return (
+        squared_error_sum / element_count,
+        absolute_error_sum / element_count,
     )
-
-    mae = (
-        absolute_error_sum
-        / element_count
-    )
-
-    return mse, mae
 
 
 # ============================================================
-# TEMPO INFERENZA
+# TEMPO DI INFERENZA
 # ============================================================
 
 def measure_inference_time(
@@ -1326,9 +1317,7 @@ def measure_inference_time(
             _ = model(batch_x)
 
             measured_batches += 1
-            total_samples += (
-                batch_x.size(0)
-            )
+            total_samples += batch_x.size(0)
 
     synchronize_device(
         device
@@ -1344,31 +1333,24 @@ def measure_inference_time(
         or total_samples == 0
     ):
         raise RuntimeError(
-            "Nessun batch misurato durante "
-            "l'inferenza."
+            "Nessun batch misurato durante l'inferenza."
         )
 
     return {
-        "measured_batches": int(
-            measured_batches
-        ),
-        "measured_samples": int(
-            total_samples
-        ),
-        "total_inference_seconds": float(
-            elapsed_seconds
-        ),
-        "inference_ms_per_batch": float(
+        "measured_batches": measured_batches,
+        "measured_samples": total_samples,
+        "total_inference_seconds": elapsed_seconds,
+        "inference_ms_per_batch": (
             elapsed_seconds
             / measured_batches
             * 1000
         ),
-        "inference_ms_per_sample": float(
+        "inference_ms_per_sample": (
             elapsed_seconds
             / total_samples
             * 1000
         ),
-        "samples_per_second": float(
+        "samples_per_second": (
             total_samples
             / elapsed_seconds
         ),
@@ -1380,7 +1362,7 @@ def measure_inference_time(
 # ============================================================
 
 def run_experiment(
-    args,
+    args: argparse.Namespace,
     config: dict,
     config_path: Path,
     top_k: Optional[int] = None,
@@ -1452,10 +1434,8 @@ def run_experiment(
         if parameter.requires_grad
     )
 
-    effective_period = (
-        get_model_fixed_period(
-            model
-        )
+    effective_period = get_model_fixed_period(
+        model
     )
 
     effective_num_blocks = (
@@ -1464,71 +1444,58 @@ def run_experiment(
         )
     )
 
-    block_type = (
-        get_model_block_type(
-            model
+    if (
+        effective_num_blocks is None
+        and num_blocks is not None
+    ):
+        effective_num_blocks = int(
+            num_blocks
         )
+
+    effective_top_k = get_model_top_k(
+        model
     )
 
-    # --------------------------------------------------------
-    # CONFIGURAZIONE EFFETTIVAMENTE UTILIZZATA
-    # --------------------------------------------------------
+    if (
+        effective_top_k is None
+        and top_k is not None
+    ):
+        effective_top_k = int(
+            top_k
+        )
+
+    block_type = get_model_block_type(
+        model
+    )
+
+    kernel_sizes = [
+        int(kernel)
+        for kernel in config.get(
+            "kernel_sizes",
+            [1, 3, 5],
+        )
+    ]
+
     config_used = dict(
         config
     )
 
-    config_used["selected_model"] = (
-        args.model
+    config_used.update(
+        {
+            "selected_model": args.model,
+            "selected_model_class": (
+                model.__class__.__name__
+            ),
+            "top_k": effective_top_k,
+            "num_blocks": effective_num_blocks,
+            "num_times_blocks": (
+                effective_num_blocks
+            ),
+            "fixed_period": effective_period,
+            "backbone_2d": block_type,
+            "kernel_sizes": kernel_sizes,
+        }
     )
-
-    config_used["selected_model_class"] = (
-        model.__class__.__name__
-    )
-
-    config_used["backbone_2d"] = (
-        block_type
-    )
-
-    if top_k is not None:
-        config_used["top_k"] = int(
-            top_k
-        )
-
-    if effective_period is not None:
-        config_used["fixed_period"] = int(
-            effective_period
-        )
-
-    if effective_num_blocks is not None:
-        config_used["num_blocks"] = int(
-            effective_num_blocks
-        )
-
-    if (
-        model.__class__.__name__
-        == "CausalTCN"
-    ):
-        config_used["num_channels"] = [
-            int(channel)
-            for channel in config.get(
-                "num_channels",
-                [32, 64],
-            )
-        ]
-
-        config_used["kernel_size"] = int(
-            config.get(
-                "kernel_size",
-                3,
-            )
-        )
-
-        config_used["dropout"] = float(
-            config.get(
-                "dropout",
-                0.2,
-            )
-        )
 
     with (
         experiment_directory
@@ -1538,48 +1505,33 @@ def run_experiment(
         encoding="utf-8",
     ) as file:
         yaml.safe_dump(
-            config_used,
+            make_json_serializable(
+                config_used
+            ),
             file,
             sort_keys=False,
         )
 
-    # --------------------------------------------------------
-    # RIEPILOGO
-    # --------------------------------------------------------
     print("\n" + "=" * 72)
-
-    print(
-        f"Modello: {args.model}"
-    )
-
+    print(f"Modello: {args.model}")
     print(
         "Classe: "
         f"{model.__class__.__name__}"
     )
-
-    if block_type is not None:
-        print(
-            f"Backbone 2D: {block_type}"
-        )
-
     print(
-        f"Dataset: "
+        "Dataset: "
         f"{config['dataset_name']}"
     )
+    print(f"seq_len: {config['seq_len']}")
+    print(f"pred_len: {config['pred_len']}")
 
-    print(
-        f"seq_len: "
-        f"{config['seq_len']}"
-    )
+    if effective_top_k is not None:
+        print(f"top_k: {effective_top_k}")
 
-    print(
-        f"pred_len: "
-        f"{config['pred_len']}"
-    )
-
-    if top_k is not None:
+    if effective_num_blocks is not None:
         print(
-            f"top_k: {top_k}"
+            "Numero TimesBlock: "
+            f"{effective_num_blocks}"
         )
 
     if effective_period is not None:
@@ -1588,31 +1540,21 @@ def run_experiment(
             f"{effective_period}"
         )
 
-    if effective_num_blocks is not None:
-        print(
-            "Numero TimesBlock: "
-            f"{effective_num_blocks}"
-        )
-
-    print(
-        f"Device: {device}"
-    )
-
+    print(f"kernel_sizes: {kernel_sizes}")
+    print(f"Device: {device}")
     print(
         "Parametri allenabili: "
         f"{parameter_count:,}"
     )
-
     print(
-        f"Output: "
-        f"{experiment_directory}"
+        f"Output: {experiment_directory}"
     )
-
     print("=" * 72)
 
     # --------------------------------------------------------
     # SANITY CHECK
     # --------------------------------------------------------
+
     sample_x, sample_y = next(
         iter(train_loader)
     )
@@ -1626,23 +1568,24 @@ def run_experiment(
 
     if sample_prediction.shape != sample_y.shape:
         raise RuntimeError(
-            "Shape non compatibili prima "
-            "del training: "
+            "Shape non compatibili prima del training: "
             f"prediction={sample_prediction.shape}, "
-            f"target={sample_y.shape}. "
-            "Il modello deve restituire "
-            "[B, pred_len, num_features]."
+            f"target={sample_y.shape}."
         )
+
+    patience_value = config.get(
+        "patience",
+        5,
+    )
+
+    patience = (
+        5
+        if patience_value is None
+        else int(patience_value)
+    )
 
     best_validation_loss = float(
         "inf"
-    )
-
-    patience = int(
-        config.get(
-            "patience",
-            5,
-        )
     )
 
     epochs_without_improvement = 0
@@ -1667,6 +1610,7 @@ def run_experiment(
     # --------------------------------------------------------
     # TRAINING
     # --------------------------------------------------------
+
     for epoch in range(
         1,
         int(config["epochs"]) + 1,
@@ -1716,21 +1660,24 @@ def run_experiment(
             float(epoch_time)
         )
 
-        if top_k is not None:
-            experiment_label = (
-                f"top_k={top_k}"
+        label_parts = []
+
+        if effective_top_k is not None:
+            label_parts.append(
+                f"top_k={effective_top_k}"
             )
 
-        elif effective_num_blocks is not None:
-            experiment_label = (
+        if effective_num_blocks is not None:
+            label_parts.append(
                 "num_times_blocks="
                 f"{effective_num_blocks}"
             )
 
-        else:
-            experiment_label = (
-                model.__class__.__name__
-            )
+        experiment_label = (
+            " | ".join(label_parts)
+            if label_parts
+            else model.__class__.__name__
+        )
 
         print(
             f"{experiment_label} | "
@@ -1766,9 +1713,7 @@ def run_experiment(
                 epochs_without_improvement
                 >= patience
             ):
-                print(
-                    "Early stopping."
-                )
+                print("Early stopping.")
                 break
 
     synchronize_device(
@@ -1801,8 +1746,8 @@ def run_experiment(
 
     if not checkpoint_path.exists():
         raise FileNotFoundError(
-            "Il checkpoint migliore non è "
-            f"stato creato: {checkpoint_path}"
+            "Il checkpoint migliore non è stato creato:\n"
+            f"{checkpoint_path}"
         )
 
     model.load_state_dict(
@@ -1812,38 +1757,28 @@ def run_experiment(
         )
     )
 
-    # --------------------------------------------------------
-    # TEST
-    # --------------------------------------------------------
-    test_mse, test_mae = (
-        evaluate_test(
-            model=model,
-            dataloader=test_loader,
-            device=device,
-        )
+    test_mse, test_mae = evaluate_test(
+        model=model,
+        dataloader=test_loader,
+        device=device,
     )
 
-    # --------------------------------------------------------
-    # INFERENZA
-    # --------------------------------------------------------
-    inference_stats = (
-        measure_inference_time(
-            model=model,
-            dataloader=test_loader,
-            device=device,
-            warmup_batches=int(
-                config.get(
-                    "inference_warmup_batches",
-                    5,
-                )
-            ),
-            max_batches=int(
-                config.get(
-                    "inference_measure_batches",
-                    30,
-                )
-            ),
-        )
+    inference_stats = measure_inference_time(
+        model=model,
+        dataloader=test_loader,
+        device=device,
+        warmup_batches=int(
+            config.get(
+                "inference_warmup_batches",
+                5,
+            )
+        ),
+        max_batches=int(
+            config.get(
+                "inference_measure_batches",
+                30,
+            )
+        ),
     )
 
     checkpoint_size_mb = (
@@ -1870,21 +1805,13 @@ def run_experiment(
         peak_gpu_memory_mb = None
         peak_gpu_reserved_mb = None
 
-    model_class_name = (
-        model.__class__.__name__
-    )
-
-    # --------------------------------------------------------
-    # METRICHE
-    # --------------------------------------------------------
     metrics = {
         "model": args.model,
-        "model_class": model_class_name,
-        "backbone_2d": block_type,
-
+        "model_class": (
+            model.__class__.__name__
+        ),
         "config": config_path.stem,
         "dataset": config["dataset_name"],
-
         "seq_len": int(
             config["seq_len"]
         ),
@@ -1895,161 +1822,76 @@ def run_experiment(
             config["batch_size"]
         ),
 
-        "top_k": (
-            int(top_k)
-            if top_k is not None
-            else None
+        "top_k": effective_top_k,
+        "num_blocks": effective_num_blocks,
+        "num_times_blocks": (
+            effective_num_blocks
         ),
+        "fixed_period": effective_period,
 
-        "fixed_period": (
-            int(effective_period)
-            if effective_period is not None
-            else None
-        ),
-
-        "num_blocks": (
-            int(effective_num_blocks)
-            if effective_num_blocks is not None
-            else None
-        ),
+        "backbone_2d": block_type,
+        "kernel_sizes": kernel_sizes,
 
         "use_fft": (
-            bool(
-                config.get(
-                    "use_fft",
-                    True,
-                )
+            True
+            if args.model
+            == "timesnet_original"
+            else config.get(
+                "use_fft"
             )
-            if args.model == "timesnet"
-            else None
         ),
 
         "use_inception": (
-            bool(
-                config.get(
-                    "use_inception",
-                    True,
-                )
+            True
+            if args.model
+            == "timesnet_original"
+            else config.get(
+                "use_inception"
             )
-            if args.model == "timesnet"
-            else None
         ),
 
-        "kernel_sizes": (
-            [
-                int(kernel)
-                for kernel in config.get(
-                    "kernel_sizes",
-                    [1, 3, 5],
-                )
-            ]
-            if (
-                block_type == "multiscale"
-                or args.model
-                == "fixed_period_inception"
-            )
-            else None
-        ),
-
-        "kernel_size": (
-            int(
-                config.get(
-                    "kernel_size",
-                    3,
-                )
-            )
-            if (
-                block_type == "single_kernel"
-                or model_class_name
-                == "CausalTCN"
-            )
-            else None
-        ),
-
-        "groups": (
-            int(
-                config.get(
-                    "groups",
-                    4,
-                )
-            )
-            if block_type == "group"
-            else None
-        ),
-
-        "num_channels": (
-            [
-                int(channel)
-                for channel in config.get(
-                    "num_channels",
-                    [32, 64],
-                )
-            ]
-            if model_class_name
-            == "CausalTCN"
-            else None
-        ),
-
-        "device": str(
-            device
-        ),
-
+        "device": str(device),
         "trainable_parameters": int(
             parameter_count
         ),
-
         "checkpoint_size_mb": float(
             checkpoint_size_mb
         ),
-
         "completed_epochs": int(
             completed_epochs
         ),
-
         "best_validation_mse": float(
             best_validation_loss
         ),
-
         "total_training_time_seconds": float(
             total_training_time
         ),
-
         "average_epoch_time_seconds": float(
             average_epoch_time
         ),
-
-        "test_mse": float(
-            test_mse
-        ),
-
-        "test_mae": float(
-            test_mae
-        ),
+        "test_mse": float(test_mse),
+        "test_mae": float(test_mae),
 
         "inference_ms_per_batch": float(
             inference_stats[
                 "inference_ms_per_batch"
             ]
         ),
-
         "inference_ms_per_sample": float(
             inference_stats[
                 "inference_ms_per_sample"
             ]
         ),
-
         "samples_per_second": float(
             inference_stats[
                 "samples_per_second"
             ]
         ),
-
         "inference_measured_batches": int(
             inference_stats[
                 "measured_batches"
             ]
         ),
-
         "inference_measured_samples": int(
             inference_stats[
                 "measured_samples"
@@ -2057,543 +1899,101 @@ def run_experiment(
         ),
 
         "peak_gpu_memory_mb": (
-            float(
-                peak_gpu_memory_mb
-            )
+            float(peak_gpu_memory_mb)
             if peak_gpu_memory_mb
             is not None
             else None
         ),
-
         "peak_gpu_reserved_mb": (
-            float(
-                peak_gpu_reserved_mb
-            )
+            float(peak_gpu_reserved_mb)
             if peak_gpu_reserved_mb
             is not None
             else None
         ),
+
+        "experiment_directory": str(
+            experiment_directory
+        ),
     }
 
-    metrics_path = (
+    save_json(
         experiment_directory
-        / "metrics.json"
+        / "metrics.json",
+        metrics,
     )
 
-    history_path = (
+    save_json(
         experiment_directory
-        / "history.json"
+        / "history.json",
+        history,
     )
 
-    with metrics_path.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            metrics,
-            file,
-            indent=4,
-        )
-
-    with history_path.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            history,
-            file,
-            indent=4,
-        )
-
-    print(
-        "\nEsperimento completato"
-    )
-
-    print(
-        f"Test MSE: "
-        f"{test_mse:.6f}"
-    )
-
-    print(
-        f"Test MAE: "
-        f"{test_mae:.6f}"
-    )
-
+    print("\nEsperimento completato")
+    print(f"Test MSE: {test_mse:.6f}")
+    print(f"Test MAE: {test_mae:.6f}")
     print(
         "Tempo medio per epoca: "
         f"{average_epoch_time:.3f}s"
     )
-
     print(
         "Inferenza: "
         f"{inference_stats['inference_ms_per_sample']:.6f} "
         "ms/campione"
     )
-
-    if peak_gpu_memory_mb is not None:
-        print(
-            "Peak GPU memory: "
-            f"{peak_gpu_memory_mb:.2f} MB"
-        )
-
     print(
-        f"Metriche salvate in: "
-        f"{metrics_path}"
+        "Metriche salvate in: "
+        f"{experiment_directory / 'metrics.json'}"
     )
 
     return metrics
 
 
 # ============================================================
-# CONFRONTO TIMESNET TOP-K
+# CONFRONTI INTERNI
 # ============================================================
 
-def compare_top_k_results(
+def save_sweep_comparison(
     results: list[dict],
-    config_path: Path,
+    output_directory: Path,
+    filename: str,
+    sort_columns: list[str],
 ) -> None:
-    import matplotlib.pyplot as plt
     import pandas as pd
 
     if not results:
-        raise ValueError(
-            "Nessun risultato da confrontare."
-        )
+        return
 
-    project_root = (
-        Path(__file__).resolve().parent.parent
-    )
-
-    experiments_root = Path(
-        os.environ.get(
-            "EXPERIMENTS_DIR",
-            project_root / "experiments",
-        )
-    )
-
-    comparison_directory = (
-        experiments_root
-        / f"timesnet_{config_path.stem}"
-        / "comparison"
-    )
-
-    comparison_directory.mkdir(
+    output_directory.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     dataframe = pd.DataFrame(
         results
-    ).sort_values(
-        by="top_k"
     )
 
-    comparison_columns = [
-        "top_k",
-        "test_mse",
-        "test_mae",
-        "best_validation_mse",
-        "trainable_parameters",
-        "average_epoch_time_seconds",
-        "total_training_time_seconds",
-        "inference_ms_per_sample",
-        "samples_per_second",
-        "peak_gpu_memory_mb",
-        "checkpoint_size_mb",
+    existing_sort_columns = [
+        column
+        for column in sort_columns
+        if column in dataframe.columns
     ]
 
-    dataframe[
-        comparison_columns
-    ].to_csv(
-        comparison_directory
-        / "comparison_top_k.csv",
+    if existing_sort_columns:
+        dataframe = dataframe.sort_values(
+            existing_sort_columns
+        )
+
+    dataframe.to_csv(
+        output_directory / filename,
         index=False,
     )
 
     print(
-        "\nConfronto top-k:\n"
+        "\nConfronto salvato in:"
     )
 
     print(
-        dataframe[
-            comparison_columns
-        ].to_string(
-            index=False
-        )
-    )
-
-    plot_specs = [
-        (
-            "test_mse",
-            "Test MSE",
-            "mse_top_k.png",
-        ),
-        (
-            "test_mae",
-            "Test MAE",
-            "mae_top_k.png",
-        ),
-        (
-            "best_validation_mse",
-            "Validation MSE",
-            "validation_mse_top_k.png",
-        ),
-        (
-            "trainable_parameters",
-            "Parametri allenabili",
-            "parameters_top_k.png",
-        ),
-        (
-            "average_epoch_time_seconds",
-            "Secondi medi per epoca",
-            "epoch_time_top_k.png",
-        ),
-        (
-            "inference_ms_per_sample",
-            "Inferenza ms/campione",
-            "inference_top_k.png",
-        ),
-    ]
-
-    for metric, ylabel, filename in plot_specs:
-        plot_data = dataframe[
-            ["top_k", metric]
-        ].dropna()
-
-        if plot_data.empty:
-            continue
-
-        plt.figure(
-            figsize=(7, 5)
-        )
-
-        plt.plot(
-            plot_data["top_k"],
-            plot_data[metric],
-            marker="o",
-        )
-
-        plt.xlabel(
-            "top_k"
-        )
-
-        plt.ylabel(
-            ylabel
-        )
-
-        plt.title(
-            f"{ylabel} al variare di top_k"
-        )
-
-        plt.xticks(
-            plot_data["top_k"]
-        )
-
-        plt.grid(True)
-        plt.tight_layout()
-
-        plt.savefig(
-            comparison_directory
-            / filename,
-            dpi=200,
-        )
-
-        plt.close()
-
-    best_row = dataframe.loc[
-        dataframe[
-            "best_validation_mse"
-        ].idxmin()
-    ]
-
-    summary = {
-        "selection_metric": (
-            "best_validation_mse"
-        ),
-        "best_top_k": int(
-            best_row["top_k"]
-        ),
-        "best_validation_mse": float(
-            best_row[
-                "best_validation_mse"
-            ]
-        ),
-        "corresponding_test_mse": float(
-            best_row["test_mse"]
-        ),
-        "corresponding_test_mae": float(
-            best_row["test_mae"]
-        ),
-    }
-
-    with (
-        comparison_directory
-        / "best_top_k.json"
-    ).open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            summary,
-            file,
-            indent=4,
-        )
-
-    print(
-        "\nMiglior top_k sulla validation: "
-        f"{summary['best_top_k']}"
-    )
-
-    print(
-        "Validation MSE: "
-        f"{summary['best_validation_mse']:.6f}"
-    )
-
-    print(
-        "Test MSE corrispondente: "
-        f"{summary['corresponding_test_mse']:.6f}"
-    )
-
-    print(
-        "Confronto salvato in: "
-        f"{comparison_directory}"
-    )
-
-
-# ============================================================
-# CONFRONTO NUMERO TIMESBLOCK
-# ============================================================
-
-def compare_num_blocks_results(
-    results: list[dict],
-    config_path: Path,
-) -> None:
-    import matplotlib.pyplot as plt
-    import pandas as pd
-
-    if not results:
-        raise ValueError(
-            "Nessun risultato da confrontare."
-        )
-
-    project_root = (
-        Path(__file__).resolve().parent.parent
-    )
-
-    experiments_root = Path(
-        os.environ.get(
-            "EXPERIMENTS_DIR",
-            project_root / "experiments",
-        )
-    )
-
-    comparison_directory = (
-        experiments_root
-        / (
-            "fixed_period_inception_timesblocks_"
-            f"{config_path.stem}"
-        )
-        / "comparison_num_times_blocks"
-    )
-
-    comparison_directory.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    dataframe = pd.DataFrame(
-        results
-    ).sort_values(
-        by="num_blocks"
-    )
-
-    comparison_columns = [
-        "num_blocks",
-        "fixed_period",
-        "test_mse",
-        "test_mae",
-        "best_validation_mse",
-        "trainable_parameters",
-        "average_epoch_time_seconds",
-        "total_training_time_seconds",
-        "inference_ms_per_sample",
-        "samples_per_second",
-        "peak_gpu_memory_mb",
-        "checkpoint_size_mb",
-    ]
-
-    dataframe[
-        comparison_columns
-    ].to_csv(
-        comparison_directory
-        / "comparison_num_times_blocks.csv",
-        index=False,
-    )
-
-    print(
-        "\nConfronto numero TimesBlock:\n"
-    )
-
-    print(
-        dataframe[
-            comparison_columns
-        ].to_string(
-            index=False
-        )
-    )
-
-    plot_specs = [
-        (
-            "test_mse",
-            "Test MSE",
-            "mse_num_times_blocks.png",
-        ),
-        (
-            "test_mae",
-            "Test MAE",
-            "mae_num_times_blocks.png",
-        ),
-        (
-            "best_validation_mse",
-            "Validation MSE",
-            "validation_num_times_blocks.png",
-        ),
-        (
-            "trainable_parameters",
-            "Parametri allenabili",
-            "parameters_num_times_blocks.png",
-        ),
-        (
-            "average_epoch_time_seconds",
-            "Secondi medi per epoca",
-            "epoch_time_num_times_blocks.png",
-        ),
-        (
-            "total_training_time_seconds",
-            "Tempo totale di training",
-            "total_time_num_times_blocks.png",
-        ),
-        (
-            "inference_ms_per_sample",
-            "Inferenza ms/campione",
-            "inference_num_times_blocks.png",
-        ),
-        (
-            "peak_gpu_memory_mb",
-            "Peak GPU memory MB",
-            "gpu_memory_num_times_blocks.png",
-        ),
-    ]
-
-    for metric, ylabel, filename in plot_specs:
-        plot_data = dataframe[
-            ["num_blocks", metric]
-        ].dropna()
-
-        if plot_data.empty:
-            continue
-
-        plt.figure(
-            figsize=(7, 5)
-        )
-
-        plt.plot(
-            plot_data["num_blocks"],
-            plot_data[metric],
-            marker="o",
-        )
-
-        plt.xlabel(
-            "Numero di TimesBlock"
-        )
-
-        plt.ylabel(
-            ylabel
-        )
-
-        plt.title(
-            f"{ylabel} al variare "
-            "del numero di TimesBlock"
-        )
-
-        plt.xticks(
-            plot_data["num_blocks"]
-        )
-
-        plt.grid(True)
-        plt.tight_layout()
-
-        plt.savefig(
-            comparison_directory
-            / filename,
-            dpi=200,
-        )
-
-        plt.close()
-
-    best_row = dataframe.loc[
-        dataframe[
-            "best_validation_mse"
-        ].idxmin()
-    ]
-
-    summary = {
-        "selection_metric": (
-            "best_validation_mse"
-        ),
-        "best_num_blocks": int(
-            best_row["num_blocks"]
-        ),
-        "best_validation_mse": float(
-            best_row[
-                "best_validation_mse"
-            ]
-        ),
-        "corresponding_test_mse": float(
-            best_row["test_mse"]
-        ),
-        "corresponding_test_mae": float(
-            best_row["test_mae"]
-        ),
-    }
-
-    with (
-        comparison_directory
-        / "best_num_times_blocks.json"
-    ).open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            summary,
-            file,
-            indent=4,
-        )
-
-    print(
-        "\nMiglior numero di TimesBlock "
-        "sulla validation: "
-        f"{summary['best_num_blocks']}"
-    )
-
-    print(
-        "Validation MSE: "
-        f"{summary['best_validation_mse']:.6f}"
-    )
-
-    print(
-        "Test MSE corrispondente: "
-        f"{summary['corresponding_test_mse']:.6f}"
-    )
-
-    print(
-        "Test MAE corrispondente: "
-        f"{summary['corresponding_test_mae']:.6f}"
-    )
-
-    print(
-        "Confronto salvato in: "
-        f"{comparison_directory}"
+        output_directory / filename
     )
 
 
@@ -2601,7 +2001,7 @@ def compare_num_blocks_results(
 # MAIN
 # ============================================================
 
-def main():
+def main() -> None:
     args = parse_args()
 
     config, config_path = load_config(
@@ -2613,39 +2013,145 @@ def main():
     )
 
     # --------------------------------------------------------
-    # TIMESNET: SWEEP TOP-K
+    # TIMESNET ORIGINAL:
+    # TOP-K × NUMERO DI TIMESBLOCK
     # --------------------------------------------------------
-    if args.model == "timesnet":
+    if args.model == "timesnet_original":
         if args.model_class is not None:
             raise ValueError(
                 "--model-class non deve essere usato "
-                "con --model timesnet."
+                "con timesnet_original."
             )
 
-        top_k_values = sorted(
-            set(
-                args.top_k_values
+        top_k_values = (
+            sorted(
+                set(args.top_k_values)
             )
+            if args.top_k_values
+            is not None
+            else [
+                int(
+                    config.get(
+                        "top_k",
+                        3,
+                    )
+                )
+            ]
         )
 
-        if not top_k_values:
-            raise ValueError(
-                "Devi specificare almeno "
-                "un valore di top_k."
+        num_blocks_values = (
+            sorted(
+                set(
+                    args.num_blocks_values
+                )
             )
+            if args.num_blocks_values
+            is not None
+            else [
+                int(
+                    config.get(
+                        "num_times_blocks",
+                        config.get(
+                            "num_blocks",
+                            1,
+                        ),
+                    )
+                )
+            ]
+        )
 
         if any(
             value <= 0
             for value in top_k_values
         ):
             raise ValueError(
-                "Tutti i valori di top_k "
-                "devono essere positivi."
+                "I valori top_k devono essere positivi."
+            )
+
+        if any(
+            value <= 0
+            for value in num_blocks_values
+        ):
+            raise ValueError(
+                "I valori num_blocks devono essere positivi."
             )
 
         print(
-            "Avvio sweep TimesNet per top_k: "
-            f"{top_k_values}"
+            "Avvio sweep TimesNetOriginal:"
+        )
+
+        print(
+            f"top_k={top_k_values}"
+        )
+
+        print(
+            "num_times_blocks="
+            f"{num_blocks_values}"
+        )
+
+        all_results = []
+
+        for top_k in top_k_values:
+            for num_blocks in (
+                num_blocks_values
+            ):
+                metrics = run_experiment(
+                    args=args,
+                    config=config,
+                    config_path=config_path,
+                    top_k=top_k,
+                    num_blocks=num_blocks,
+                )
+
+                all_results.append(
+                    metrics
+                )
+
+        comparison_directory = (
+            get_experiments_root()
+            / (
+                "timesnet_original_"
+                f"{config_path.stem}"
+            )
+            / "comparison"
+        )
+
+        save_sweep_comparison(
+            results=all_results,
+            output_directory=(
+                comparison_directory
+            ),
+            filename=(
+                "comparison_top_k_"
+                "num_times_blocks.csv"
+            ),
+            sort_columns=[
+                "top_k",
+                "num_times_blocks",
+            ],
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # VECCHIA TIMESNET models_2d:
+    # SWEEP TOP-K
+    # --------------------------------------------------------
+    if args.model == "timesnet_mod_2d":
+        top_k_values = (
+            sorted(
+                set(args.top_k_values)
+            )
+            if args.top_k_values
+            is not None
+            else [
+                int(
+                    config.get(
+                        "top_k",
+                        3,
+                    )
+                )
+            ]
         )
 
         all_results = []
@@ -2663,50 +2169,59 @@ def main():
                 metrics
             )
 
-        compare_top_k_results(
+        comparison_directory = (
+            get_experiments_root()
+            / (
+                "timesnet_mod_2d_"
+                f"{config_path.stem}"
+            )
+            / "comparison"
+        )
+
+        save_sweep_comparison(
             results=all_results,
-            config_path=config_path,
+            output_directory=(
+                comparison_directory
+            ),
+            filename="comparison_top_k.csv",
+            sort_columns=["top_k"],
         )
 
         return
 
     # --------------------------------------------------------
-    # FIXED PERIOD INCEPTION:
-    # SWEEP 1, 2, 3 TIMESBLOCK
+    # FIXED PERIOD:
+    # SWEEP NUMERO TIMESBLOCK
     # --------------------------------------------------------
     if args.model == "fixed_period_inception":
-        if args.model_class is not None:
-            raise ValueError(
-                "--model-class non deve essere usato "
-                "con --model fixed_period_inception."
+        num_blocks_values = (
+            sorted(
+                set(
+                    args.num_blocks_values
+                )
             )
-
-        num_blocks_values = sorted(
-            set(
-                args.num_blocks_values
-            )
+            if args.num_blocks_values
+            is not None
+            else [
+                int(
+                    config.get(
+                        "num_blocks",
+                        config.get(
+                            "num_times_blocks",
+                            1,
+                        ),
+                    )
+                )
+            ]
         )
-
-        if not num_blocks_values:
-            raise ValueError(
-                "Devi specificare almeno un valore "
-                "di num_blocks."
-            )
 
         if any(
             value <= 0
             for value in num_blocks_values
         ):
             raise ValueError(
-                "Tutti i valori di num_blocks "
-                "devono essere positivi."
+                "I valori num_blocks devono essere positivi."
             )
-
-        print(
-            "Avvio sweep FixedPeriodInception "
-            "per numero di TimesBlock: "
-            f"{num_blocks_values}"
-        )
 
         all_results = []
 
@@ -2723,37 +2238,35 @@ def main():
                 metrics
             )
 
-        compare_num_blocks_results(
+        comparison_directory = (
+            get_experiments_root()
+            / (
+                "fixed_period_inception_"
+                "timesblocks_"
+                f"{config_path.stem}"
+            )
+            / "comparison_num_times_blocks"
+        )
+
+        save_sweep_comparison(
             results=all_results,
-            config_path=config_path,
+            output_directory=(
+                comparison_directory
+            ),
+            filename=(
+                "comparison_num_times_blocks.csv"
+            ),
+            sort_columns=[
+                "num_times_blocks"
+            ],
         )
 
         return
 
     # --------------------------------------------------------
-    # TIMESNET LIGHT
+    # ALTRI MODELLI:
+    # SINGO ESPERIMENTO
     # --------------------------------------------------------
-    if (
-        args.model == "timesnet_light"
-        and args.model_class is None
-    ):
-        raise ValueError(
-            "Per --model timesnet_light devi "
-            "specificare --model-class. "
-            "Classi disponibili: "
-            "LightTimesNetMultiScale, "
-            "LightTimesNetDepthwise, "
-            "LightTimesNetGroup, "
-            "LightTimesNetSingleKernel."
-        )
-
-    # --------------------------------------------------------
-    # ALTRI MODELLI: SINGOLO ESPERIMENTO
-    # --------------------------------------------------------
-    print(
-        "Avvio singolo esperimento: "
-        f"{args.model}"
-    )
 
     metrics = run_experiment(
         args=args,
@@ -2763,36 +2276,18 @@ def main():
         num_blocks=None,
     )
 
+    print("\nRiepilogo")
     print(
-        "\nRiepilogo:"
+        f"Modello: {metrics['model']}"
     )
-
     print(
-        f"Modello: "
-        f"{metrics['model']}"
+        f"Classe: {metrics['model_class']}"
     )
-
     print(
-        f"Classe: "
-        f"{metrics['model_class']}"
+        f"Test MSE: {metrics['test_mse']:.6f}"
     )
-
-    if metrics.get(
-        "backbone_2d"
-    ) is not None:
-        print(
-            "Backbone 2D: "
-            f"{metrics['backbone_2d']}"
-        )
-
     print(
-        f"Test MSE: "
-        f"{metrics['test_mse']:.6f}"
-    )
-
-    print(
-        f"Test MAE: "
-        f"{metrics['test_mae']:.6f}"
+        f"Test MAE: {metrics['test_mae']:.6f}"
     )
 
 
