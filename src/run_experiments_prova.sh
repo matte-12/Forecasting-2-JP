@@ -45,13 +45,9 @@ export PYTHONPATH="$PROJECT_ROOT"
 #     <repository>/data
 # ============================================================
 
-export EXPERIMENTS_ROOT="${
-    EXPERIMENTS_ROOT:-$PROJECT_ROOT/experiments
-}"
+export EXPERIMENTS_ROOT="${EXPERIMENTS_ROOT:-$PROJECT_ROOT/experiments}"
 
-export DATA_ROOT="${
-    DATA_ROOT:-$PROJECT_ROOT/data
-}"
+export DATA_ROOT="${DATA_ROOT:-$PROJECT_ROOT/data}"
 
 
 # ============================================================
@@ -93,9 +89,7 @@ print_elapsed_time() {
 
     HOURS=$((ELAPSED / 3600))
 
-    MINUTES=$(
-        (ELAPSED % 3600) / 60
-    )
+    MINUTES=$((ELAPSED % 3600) / 60)
 
     SECONDS=$((ELAPSED % 60))
 
@@ -209,9 +203,7 @@ run_runner \
 # RUN_COMPARISONS=1 bash run_experiments_prova.sh
 # ============================================================
 
-RUN_COMPARISONS="${
-    RUN_COMPARISONS:-0
-}"
+RUN_COMPARISONS="${RUN_COMPARISONS:-0}"
 
 
 if [ "$RUN_COMPARISONS" = "1" ]; then
