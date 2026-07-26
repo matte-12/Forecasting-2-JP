@@ -1,4 +1,5 @@
 import argparse
+import os
 import random
 import time
 import json
@@ -6,13 +7,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import shutil
 import torch
 import torch.nn as nn
 from torch import optim
 import yaml
+import matplotlib.pyplot as plt
 
-# Moduli custom (Assicurati che i nomi dei file riflettano quelli nel tuo ambiente locale)
+# Moduli custom
 from src.data import build_dataloader
 from src.metrics import metric_mse, metric_mae, metric_mase
 from src.models_1d import DLinear, CausalTCN
@@ -40,12 +41,14 @@ class EarlyStopping:
         self.early_stop = False
         self.val_loss_min = np.inf
         self.path = path
+        self.best_epoch = 0
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss, model, epoch):
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
             self.save_checkpoint(val_loss, model)
+            self.best_epoch = epoch
         elif score < self.best_score:
             self.counter += 1
             if self.counter >= self.patience:
@@ -53,6 +56,7 @@ class EarlyStopping:
         else:
             self.best_score = score
             self.save_checkpoint(val_loss, model)
+            self.best_epoch = epoch
             self.counter = 0
 
     def save_checkpoint(self, val_loss, model):
@@ -73,7 +77,6 @@ def synchronize_device(device):
         torch.mps.synchronize()
 
 def measure_inference_time(model, dataloader, device, warmup_batches=5, max_batches=30):
-    """Modulo di misurazione latenza ottimizzato di Matteo"""
     model.eval()
     warmup_count = 0
     with torch.no_grad():
@@ -109,6 +112,65 @@ def measure_inference_time(model, dataloader, device, warmup_batches=5, max_batc
         "samples_per_second": (total_samples / elapsed_seconds) if elapsed_seconds else 0,
     }
 
+def save_learning_curves(history, best_epoch_idx, save_path):
+    """
+    Genera il plot vettoriale della convergenza architetturale con regioni di ablazione.
+    """
+    train_loss = history["train_mse"]
+    val_loss = history["val_mse"]
+    epochs = np.arange(1, len(train_loss) + 1)
+
+    best_epoch = epochs[best_epoch_idx]
+    best_val = val_loss[best_epoch_idx]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.plot(epochs, train_loss, color='blue', label='Train. error', linewidth=2)
+    ax.plot(epochs, val_loss, color='red', label='Valid. error', linewidth=2)
+
+    # Definizione Regioni Topologiche
+    ok_start = max(1, best_epoch - 1)
+    ok_end = min(len(epochs), best_epoch + 1)
+
+    y_max = max(max(train_loss), max(val_loss))
+    y_min = min(min(train_loss), min(val_loss))
+    text_y = y_min + (y_max - y_min) * 0.85
+
+    # Zona Underfitting
+    ax.axvspan(1, ok_start, facecolor='#E8D8D8', alpha=0.6)
+    if ok_start > 1:
+        ax.text((1 + ok_start)/2, text_y, 'UNDERFITTING', ha='center', va='center', fontweight='bold')
+
+    # Zona Convergenza (OK)
+    ax.axvspan(ok_start, ok_end, facecolor='#D8E8D8', alpha=0.6)
+    ax.text(best_epoch, text_y, 'OK', ha='center', va='center', fontweight='bold')
+
+    # Zona Overfitting (Trigger Early Stopping)
+    if ok_end < len(epochs):
+        ax.axvspan(ok_end, len(epochs), facecolor='#F8D8D8', alpha=0.6)
+        ax.text((ok_end + len(epochs))/2, text_y, 'OVERFITTING', ha='center', va='center', fontweight='bold')
+
+    # Marker Matematico Peso Ottimo
+    ax.annotate(r'STOP HERE' + '\n' + r'$\mathcal{W}^*$',
+                xy=(best_epoch, best_val),
+                xytext=(best_epoch, best_val + (y_max - y_min)*0.15),
+                arrowprops=dict(facecolor='black', shrink=0.05, width=2, headwidth=8),
+                ha='center', va='bottom', fontsize=14, fontweight='bold')
+
+    # Stile
+    ax.set_xlabel('Training epochs', fontweight='bold', loc='right')
+    ax.set_ylabel(r'$\mathcal{L}$', fontsize=20, rotation=0, labelpad=15, loc='top')
+    ax.set_title('Training-validation curves', fontsize=22, loc='left', color='#003300')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_linewidth(2)
+    ax.spines['left'].set_linewidth(2)
+    ax.legend(frameon=False, loc='upper right')
+
+    plt.tight_layout()
+    plt.savefig(save_path, format='pdf', dpi=300)
+    plt.close()
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="E.g., etth1_24")
@@ -139,7 +201,6 @@ def main():
     top_k = args.override_top_k if args.override_top_k else config.get("top_k", 3)
     num_blocks = args.override_num_blocks if args.override_num_blocks else config.get("num_blocks", 1)
 
-    # Aggiorna il config per passarlo al Dataloader
     config["seq_len"] = seq_len
     
     # ----------------------------------------------------------------------
@@ -179,9 +240,7 @@ def main():
 
     exp_dir = project_root / "experiments" / exp_name
     exp_dir.mkdir(parents=True, exist_ok=True)
-    
     ckpt_path = exp_dir / "best_model.pth"
-    shutil.copy(config_path, exp_dir / "config_used.yaml")
 
     print(f"🚀 Modello: {args.model} | Config: {args.config} | Parametri: {parameter_count:,}")
     
@@ -233,12 +292,15 @@ def main():
         
         print(f"Epoch {epoch+1:02d} | Train MSE: {train_mse_epoch:.4f} | Val MSE: {val_mse_epoch:.4f} | Time: {epoch_time:.2f}s")
         
-        early_stopping(val_mse_epoch, model)
+        early_stopping(val_mse_epoch, model, epoch)
         if early_stopping.early_stop:
             print("🛑 Early Stopping Innescato.")
             break
 
     total_training_time = time.perf_counter() - training_start
+
+    # Salvataggio Curve in PDF
+    save_learning_curves(train_history, early_stopping.best_epoch, exp_dir / "learning_curves.pdf")
 
     # --- TESTING E INFERENZA ---
     model.load_state_dict(torch.load(str(ckpt_path), map_location=device))
@@ -257,15 +319,24 @@ def main():
     
     inf_stats = measure_inference_time(model, test_loader, device)
 
-    # Raccolta Metriche Finali
+    # Raccolta Metriche Finali Modello-Agnostiche
     metrics = {
         "model": args.model,
         "config": args.config,
         "dataset": config["dataset_name"],
         "pred_len": pred_len,
-        "fixed_period": period,
-        "top_k": top_k,
-        "num_blocks": num_blocks,
+        "seq_len": seq_len
+    }
+
+    # Iniezione condizionale delle metriche architetturali
+    if args.model == "TimesNetOriginal":
+        metrics["top_k"] = top_k
+        metrics["num_blocks"] = num_blocks
+    elif args.model not in ["DLinear", "CausalTCN"]:
+        metrics["fixed_period"] = period
+        metrics["num_blocks"] = num_blocks
+
+    metrics.update({
         "test_mse": float(mse),
         "test_mae": float(mae),
         "test_mase": float(mase),
@@ -275,7 +346,7 @@ def main():
         "inference_ms_per_sample": float(inf_stats["inference_ms_per_sample"]),
         "peak_gpu_memory_mb": float(torch.cuda.max_memory_allocated(device) / 1024**2) if device.type == "cuda" else None,
         "checkpoint_size_mb": float(ckpt_path.stat().st_size / 1024**2)
-    }
+    })
     
     print(f"\n📊 Risultati Test -> MSE: {mse:.4f} | MAE: {mae:.4f} | MASE: {mase:.4f}")
 
