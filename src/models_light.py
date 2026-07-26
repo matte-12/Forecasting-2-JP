@@ -145,19 +145,23 @@ class LightTimesBlock(nn.Module):
         return out_1d[:, :time_steps, :] + x
 
 # ============================================================
-# 6. MODELLO LIGHT GENERICO
+# 6. MODELLO LIGHT GENERICO (Aggiornato per num_blocks)
 # ============================================================
 class LightTimesNet(nn.Module):
     def __init__(
         self, seq_len: int = 96, pred_len: int = 24, enc_in: int = 7, d_model: int = 32,
         fixed_period: int = 24, dropout: float = 0.1, block_type: str = "multiscale",
-        kernel_sizes=(1, 3, 5), kernel_size: int = 3, groups: int = 4
+        kernel_sizes=(1, 3, 5), kernel_size: int = 3, groups: int = 4, num_blocks: int = 1
     ):
         super().__init__()
         self.embedding = nn.Linear(enc_in, d_model)
-        self.times_block = LightTimesBlock(
-            d_model, fixed_period, block_type, kernel_sizes, kernel_size, groups
-        )
+        
+        # Inizializza N blocchi in cascata
+        self.times_blocks = nn.ModuleList([
+            LightTimesBlock(d_model, fixed_period, block_type, kernel_sizes, kernel_size, groups)
+            for _ in range(num_blocks)
+        ])
+        
         self.projection = nn.Sequential(
             nn.Linear(seq_len, pred_len),
             nn.Dropout(dropout)
@@ -166,9 +170,11 @@ class LightTimesNet(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         encoded = self.embedding(x)
-        encoded = self.times_block(encoded)
         
-        # Proiezione Temporale: [B, T, d_model] -> [B, H, d_model]
+        # Processa attraverso tutti i blocchi sequenzialmente
+        for block in self.times_blocks:
+            encoded = block(encoded)
+            
         encoded = encoded.transpose(1, 2)
         decoded = self.projection(encoded)
         decoded = decoded.transpose(1, 2)
@@ -176,23 +182,23 @@ class LightTimesNet(nn.Module):
         return self.out_layer(decoded)
 
 # ============================================================
-# 7. CLASSI WRAPPER (Per instanziazione diretta da factory)
+# 7. CLASSI WRAPPER (Aggiornate)
 # ============================================================
 class LightTimesNetMultiScale(LightTimesNet):
-    def __init__(self, seq_len=96, pred_len=24, enc_in=7, d_model=32, fixed_period=24, dropout=0.1, kernel_sizes=(1, 3, 5)):
-        super().__init__(seq_len, pred_len, enc_in, d_model, fixed_period, dropout, "multiscale", kernel_sizes)
+    def __init__(self, seq_len=96, pred_len=24, enc_in=7, d_model=32, fixed_period=24, dropout=0.1, kernel_sizes=(1, 3, 5), num_blocks=1):
+        super().__init__(seq_len, pred_len, enc_in, d_model, fixed_period, dropout, "multiscale", kernel_sizes, num_blocks=num_blocks)
 
 class LightTimesNetDepthwise(LightTimesNet):
-    def __init__(self, seq_len=96, pred_len=24, enc_in=7, d_model=32, fixed_period=24, dropout=0.1):
-        super().__init__(seq_len, pred_len, enc_in, d_model, fixed_period, dropout, "depthwise")
+    def __init__(self, seq_len=96, pred_len=24, enc_in=7, d_model=32, fixed_period=24, dropout=0.1, num_blocks=1):
+        super().__init__(seq_len, pred_len, enc_in, d_model, fixed_period, dropout, "depthwise", num_blocks=num_blocks)
 
 class LightTimesNetGroup(LightTimesNet):
-    def __init__(self, seq_len=96, pred_len=24, enc_in=7, d_model=32, fixed_period=24, dropout=0.1, groups=4):
-        super().__init__(seq_len, pred_len, enc_in, d_model, fixed_period, dropout, "group", groups=groups)
+    def __init__(self, seq_len=96, pred_len=24, enc_in=7, d_model=32, fixed_period=24, dropout=0.1, groups=4, num_blocks=1):
+        super().__init__(seq_len, pred_len, enc_in, d_model, fixed_period, dropout, "group", groups=groups, num_blocks=num_blocks)
 
 class LightTimesNetSingleKernel(LightTimesNet):
-    def __init__(self, seq_len=96, pred_len=24, enc_in=7, d_model=32, fixed_period=24, dropout=0.1, kernel_size=3):
-        super().__init__(seq_len, pred_len, enc_in, d_model, fixed_period, dropout, "single_kernel", kernel_size=kernel_size)
+    def __init__(self, seq_len=96, pred_len=24, enc_in=7, d_model=32, fixed_period=24, dropout=0.1, kernel_size=3, num_blocks=1):
+        super().__init__(seq_len, pred_len, enc_in, d_model, fixed_period, dropout, "single_kernel", kernel_size=kernel_size, num_blocks=num_blocks)
 
 # ============================================================
 # 8. TEST
