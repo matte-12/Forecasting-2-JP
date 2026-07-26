@@ -1,0 +1,110 @@
+{
+  "experiments": [
+    {
+      "name": "cicli",
+      "enabled": true,
+      "datasets": [
+        "etth1"
+        
+      ],
+      "models": [
+        {
+          "model": "dlinear"
+        },
+        {
+          "model": "tcn"
+        },
+        {
+          "model": "fixed_period_inception",
+          "fixed_period_values": [
+            24
+          ],
+          "num_blocks_values": [
+            1
+          ]
+        }
+      ],
+      "sweeps": {
+        "seq_len": [
+          96,
+          192,
+          384
+        ]
+      }
+    },
+    {
+      "name": "times_block",
+      "enabled": true,
+      "datasets": [
+        "etth1"
+      ],
+      "models": [
+        {
+          "model": "timesnet_original",
+          "top_k_values": [
+            1,
+            2,
+            3
+          ],
+          "num_blocks_values": [
+            1,
+            2,
+            3
+          ]
+        },
+        {
+          "model": "fixed_period_inception",
+          "fixed_period_values": [
+            24
+          ],
+          "num_blocks_values": [
+            1,
+            2,
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "name": "backbone2d",
+      "enabled": true,
+      "datasets": [
+        "etth1"
+      ],
+      "models": [
+        {
+          "model": "timesnet_light",
+          "model_classes": [
+            "LightTimesNetMultiScale",
+            "LightTimesNetDepthwise",
+            "LightTimesNetGroup",
+            "LightTimesNetSingleKernel"
+          ],
+          "fixed_period_values": [
+            24
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fixed_period",
+      "enabled": true,
+      "datasets": [
+        "etth1"
+      ],
+      "models": [
+        {
+          "model": "fixed_period_inception",
+          "fixed_period_values": [
+            24,
+            48,
+            17
+          ],
+          "num_blocks_values": [
+            1
+          ]
+        }
+      ]
+    }
+  ]
+}
