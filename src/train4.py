@@ -1,13 +1,12 @@
 import argparse
-import os
 import random
 import time
 import json
-import shutil
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import shutil
 import torch
 import torch.nn as nn
 from torch import optim
@@ -114,9 +113,10 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="E.g., etth1_24")
     parser.add_argument("--model", type=str, required=True, help="Nome del modello da instanziare")
-    parser.add_argument("--override-period", type=int, default=None, help="Sovrascrive il fixed_period dello YAML")
-    parser.add_argument("--override-top-k", type=int, default=None, help="Sovrascrive il top_k dello YAML")
-    parser.add_argument("--override-num-blocks", type=int, default=None, help="Sovrascrive num_blocks dello YAML")
+    parser.add_argument("--override-seq-len", type=int, default=None, help="Sovrascrive la seq_len")
+    parser.add_argument("--override-period", type=int, default=None, help="Sovrascrive il fixed_period")
+    parser.add_argument("--override-top-k", type=int, default=None, help="Sovrascrive il top_k")
+    parser.add_argument("--override-num-blocks", type=int, default=None, help="Sovrascrive num_blocks")
     return parser.parse_args()
 
 def main():
@@ -130,17 +130,20 @@ def main():
     set_seed(config.get("seed", 42))
     device = get_device()
     
-    # Risoluzione Parametri
-    seq_len = config["seq_len"]
+    # Override Dinamici
+    seq_len = args.override_seq_len if args.override_seq_len else config["seq_len"]
     pred_len = config["pred_len"]
     enc_in = config["num_features"]
     
     period = args.override_period if args.override_period else config.get("fixed_period", 24)
     top_k = args.override_top_k if args.override_top_k else config.get("top_k", 3)
     num_blocks = args.override_num_blocks if args.override_num_blocks else config.get("num_blocks", 1)
+
+    # Aggiorna il config per passarlo al Dataloader
+    config["seq_len"] = seq_len
     
     # ----------------------------------------------------------------------
-    # EXPLICIT MODEL FACTORY (Niente importlib/inspect - 100% Deterministico)
+    # EXPLICIT MODEL FACTORY
     # ----------------------------------------------------------------------
     if args.model == "DLinear":
         model = DLinear(seq_len=seq_len, pred_len=pred_len, enc_in=enc_in)
@@ -151,13 +154,13 @@ def main():
     elif args.model == "FixedPeriodInception":
         model = FixedPeriodInception2D(seq_len=seq_len, pred_len=pred_len, num_features=enc_in, period=period, d_model=32, d_ff=64, num_blocks=num_blocks)
     elif args.model == "LightTimesNet_MultiScale":
-        model = LightTimesNetMultiScale(seq_len=seq_len, pred_len=pred_len, enc_in=enc_in, d_model=32, fixed_period=period)
+        model = LightTimesNetMultiScale(seq_len=seq_len, pred_len=pred_len, enc_in=enc_in, d_model=32, fixed_period=period, num_blocks=num_blocks)
     elif args.model == "LightTimesNet_Depthwise":
-        model = LightTimesNetDepthwise(seq_len=seq_len, pred_len=pred_len, enc_in=enc_in, d_model=32, fixed_period=period)
+        model = LightTimesNetDepthwise(seq_len=seq_len, pred_len=pred_len, enc_in=enc_in, d_model=32, fixed_period=period, num_blocks=num_blocks)
     elif args.model == "LightTimesNet_Group":
-        model = LightTimesNetGroup(seq_len=seq_len, pred_len=pred_len, enc_in=enc_in, d_model=32, fixed_period=period)
+        model = LightTimesNetGroup(seq_len=seq_len, pred_len=pred_len, enc_in=enc_in, d_model=32, fixed_period=period, num_blocks=num_blocks)
     elif args.model == "LightTimesNet_SingleKernel":
-        model = LightTimesNetSingleKernel(seq_len=seq_len, pred_len=pred_len, enc_in=enc_in, d_model=32, fixed_period=period)
+        model = LightTimesNetSingleKernel(seq_len=seq_len, pred_len=pred_len, enc_in=enc_in, d_model=32, fixed_period=period, num_blocks=num_blocks)
     else:
         raise ValueError(f"Modello {args.model} non supportato o nome errato nel JSON.")
 
@@ -165,9 +168,15 @@ def main():
     parameter_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     # ----------------------------------------------------------------------
-    # FLAT DIRECTORY LOGGING
+    # NAMING INTELLIGENTE DELLE DIRECTORY ESPERIMENTI
     # ----------------------------------------------------------------------
-    exp_name = f"{args.model}_{config['dataset_name']}_H{pred_len}_P{period}_K{top_k}_B{num_blocks}"
+    exp_name = f"{args.model}_{config['dataset_name']}_S{seq_len}_H{pred_len}"
+    
+    if args.model == "TimesNetOriginal":
+        exp_name += f"_K{top_k}_B{num_blocks}"
+    elif args.model not in ["DLinear", "CausalTCN"]:
+        exp_name += f"_P{period}_B{num_blocks}"
+
     exp_dir = project_root / "experiments" / exp_name
     exp_dir.mkdir(parents=True, exist_ok=True)
     

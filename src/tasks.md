@@ -1,0 +1,192 @@
+ - python src/train_finale.py --config etth1_24 --model CausalTCN --override-seq-len 192
+ - python src/train_finale.py --config etth1_24 --model CausalTCN --override-seq-len 96
+ - python src/train_finale.py --config etth1_24 --model CausalTCN --override-seq-len 384
+ - python src/train_finale.py --config etth1_24 --model DLinear --override-seq-len 192
+ - python src/train_finale.py --config etth1_24 --model DLinear --override-seq-len 384
+ - python src/train_finale.py --config etth1_24 --model DLinear --override-seq-len 96
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 192 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 384 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_24 --model LightTimesNet_Depthwise --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model LightTimesNet_Group --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model LightTimesNet_MultiScale --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model LightTimesNet_SingleKernel --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 192 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 384 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_48 --model CausalTCN --override-seq-len 96
+ - python src/train_finale.py --config etth1_48 --model CausalTCN --override-seq-len 192
+ - python src/train_finale.py --config etth1_48 --model CausalTCN --override-seq-len 384
+ - python src/train_finale.py --config etth1_48 --model DLinear --override-seq-len 384
+ - python src/train_finale.py --config etth1_48 --model DLinear --override-seq-len 96
+ - python src/train_finale.py --config etth1_48 --model DLinear --override-seq-len 192
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 192 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 384 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_48 --model LightTimesNet_Depthwise --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model LightTimesNet_Group --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model LightTimesNet_MultiScale --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model LightTimesNet_SingleKernel --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 192 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 384 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_96 --model CausalTCN --override-seq-len 384
+ - python src/train_finale.py --config etth1_96 --model CausalTCN --override-seq-len 192
+ - python src/train_finale.py --config etth1_96 --model CausalTCN --override-seq-len 96
+ - python src/train_finale.py --config etth1_96 --model DLinear --override-seq-len 384
+ - python src/train_finale.py --config etth1_96 --model DLinear --override-seq-len 96
+ - python src/train_finale.py --config etth1_96 --model DLinear --override-seq-len 192
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 192 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model FixedPeriodInception --override-seq-len 384 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model LightTimesNet_Depthwise --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model LightTimesNet_Group --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model LightTimesNet_MultiScale --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model LightTimesNet_SingleKernel --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 384 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 3
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 192 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 1
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 2
+ - python src/train_finale.py --config etth1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_24 --model CausalTCN --override-seq-len 384
+ - python src/train_finale.py --config ettm1_24 --model CausalTCN --override-seq-len 192
+ - python src/train_finale.py --config ettm1_24 --model CausalTCN --override-seq-len 96
+ - python src/train_finale.py --config ettm1_24 --model DLinear --override-seq-len 384
+ - python src/train_finale.py --config ettm1_24 --model DLinear --override-seq-len 96
+ - python src/train_finale.py --config ettm1_24 --model DLinear --override-seq-len 192
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 192 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 384 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model LightTimesNet_Depthwise --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model LightTimesNet_Group --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model LightTimesNet_MultiScale --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model LightTimesNet_SingleKernel --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 192 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 384 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_24 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_48 --model CausalTCN --override-seq-len 384
+ - python src/train_finale.py --config ettm1_48 --model CausalTCN --override-seq-len 192
+ - python src/train_finale.py --config ettm1_48 --model CausalTCN --override-seq-len 96
+ - python src/train_finale.py --config ettm1_48 --model DLinear --override-seq-len 96
+ - python src/train_finale.py --config ettm1_48 --model DLinear --override-seq-len 384
+ - python src/train_finale.py --config ettm1_48 --model DLinear --override-seq-len 192
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 384 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 192 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model LightTimesNet_Depthwise --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model LightTimesNet_Group --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model LightTimesNet_MultiScale --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model LightTimesNet_SingleKernel --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 384 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 192 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_48 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_96 --model CausalTCN --override-seq-len 192
+ - python src/train_finale.py --config ettm1_96 --model CausalTCN --override-seq-len 96
+ - python src/train_finale.py --config ettm1_96 --model CausalTCN --override-seq-len 384
+ - python src/train_finale.py --config ettm1_96 --model DLinear --override-seq-len 192
+ - python src/train_finale.py --config ettm1_96 --model DLinear --override-seq-len 384
+ - python src/train_finale.py --config ettm1_96 --model DLinear --override-seq-len 96
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 384 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 17 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 192 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 48 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_96 --model FixedPeriodInception --override-seq-len 96 --override-period 24 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_96 --model LightTimesNet_Depthwise --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model LightTimesNet_Group --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model LightTimesNet_MultiScale --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model LightTimesNet_SingleKernel --override-seq-len 96 --override-period 24 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 192 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 384 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 1
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 3 --override-num-blocks 2
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 2 --override-num-blocks 3
+ - python src/train_finale.py --config ettm1_96 --model TimesNetOriginal --override-seq-len 96 --override-top-k 1 --override-num-blocks 2
