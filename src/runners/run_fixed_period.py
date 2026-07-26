@@ -37,7 +37,10 @@ la cartella temporanea quando tutti i file sono stati trasferiti.
 """
 
 from __future__ import annotations
-
+from src.runners.dataset_selection import (
+    get_enabled_datasets,
+    print_enabled_datasets,
+)
 import json
 import shutil
 from pathlib import Path
@@ -504,7 +507,19 @@ def main() -> None:
         create=True
     )
 
-    yaml_files = find_config_files()
+    runner_name = "run_fixed_period"
+
+    enabled_datasets = get_enabled_datasets(
+        runner_name
+    )
+
+    yaml_files = find_config_files(
+        dataset_names=enabled_datasets
+    )
+
+    print_enabled_datasets(
+        runner_name
+    )
 
     print_runner_header(
         title=(

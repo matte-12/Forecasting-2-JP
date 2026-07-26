@@ -36,6 +36,10 @@ con nomi piatti, per esempio:
 """
 
 from __future__ import annotations
+from src.runners.dataset_selection import (
+    get_enabled_datasets,
+    print_enabled_datasets,
+)
 
 from src.runners.paths import get_experiments_root
 from src.runners.runner_utils import (
@@ -75,7 +79,19 @@ def main() -> None:
         create=True
     )
 
-    yaml_files = find_config_files()
+    runner_name = "run_cicli"
+
+    enabled_datasets = get_enabled_datasets(
+        runner_name
+    )
+
+    yaml_files = find_config_files(
+        dataset_names=enabled_datasets
+    )
+
+    print_enabled_datasets(
+        runner_name
+    )
 
     print_runner_header(
         title="RUNNER CICLI: SEQ_LEN 96 VS 192 VS 384",

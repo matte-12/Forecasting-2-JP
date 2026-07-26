@@ -8,6 +8,10 @@ experiments/backbone2d/
 
 from __future__ import annotations
 from src.runners.paths import get_experiments_root
+from src.runners.dataset_selection import (
+    get_enabled_datasets,
+    print_enabled_datasets,
+)
 
 from src.runners.runner_utils import (
     build_train_command,
@@ -42,7 +46,19 @@ def main() -> None:
         create=True
     )
 
-    yaml_files = find_config_files()
+    runner_name = "run_backbone2d"
+
+    enabled_datasets = get_enabled_datasets(
+        runner_name
+    )
+
+    yaml_files = find_config_files(
+        dataset_names=enabled_datasets
+    )
+
+    print_enabled_datasets(
+        runner_name
+    )
 
     print_runner_header(
         title="RUNNER BACKBONE 2D",

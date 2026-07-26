@@ -15,7 +15,10 @@ experiments/times_block/
 """
 from src.runners.paths import get_experiments_root
 from __future__ import annotations
-
+from src.runners.dataset_selection import (
+    get_enabled_datasets,
+    print_enabled_datasets,
+)
 from src.runners.runner_utils import (
     build_train_command,
     find_config_files,
@@ -49,7 +52,19 @@ def main() -> None:
         create=True
     )
 
-    yaml_files = find_config_files()
+    runner_name = "run_times_block"
+
+    enabled_datasets = get_enabled_datasets(
+        runner_name
+    )
+
+    yaml_files = find_config_files(
+        dataset_names=enabled_datasets
+    )
+
+    print_enabled_datasets(
+        runner_name
+    )
 
     print_runner_header(
         title="RUNNER TIMES BLOCK",
