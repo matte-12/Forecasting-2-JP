@@ -1,11 +1,20 @@
 {
-  "experiments": [
+  "settings": {
+    "stop_on_error": false,
+    "skip_existing": true
+  },
+  "groups": [
     {
       "name": "cicli",
       "enabled": true,
       "datasets": [
-        "etth1"
-        
+        "etth1",
+        "electricity"
+      ],
+      "seq_len_values": [
+        96,
+        192,
+        384
       ],
       "models": [
         {
@@ -23,20 +32,15 @@
             1
           ]
         }
-      ],
-      "sweeps": {
-        "seq_len": [
-          96,
-          192,
-          384
-        ]
-      }
+      ]
     },
     {
       "name": "times_block",
       "enabled": true,
       "datasets": [
-        "etth1"
+        "etth1",
+        "ettm1",
+        "electricity"
       ],
       "models": [
         {
@@ -69,7 +73,8 @@
       "name": "backbone2d",
       "enabled": true,
       "datasets": [
-        "etth1"
+        "etth1",
+        "electricity"
       ],
       "models": [
         {
@@ -82,6 +87,9 @@
           ],
           "fixed_period_values": [
             24
+          ],
+          "num_blocks_values": [
+            1
           ]
         }
       ]
@@ -90,7 +98,9 @@
       "name": "fixed_period",
       "enabled": true,
       "datasets": [
-        "etth1"
+        "etth1",
+        "ettm1",
+        "electricity"
       ],
       "models": [
         {
