@@ -28,7 +28,7 @@ def main():
                     
                     # Costruzione del comando base
                     cmd = [
-                        "python", "src/train_finale.py",
+                        "python", "-m", "src.train4",
                         "--config", config,
                         "--model", model,
                         "--override-period", str(period),
