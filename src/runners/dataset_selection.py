@@ -30,27 +30,29 @@ RUNNER_DATASETS = {
     # Sweep seq_len 96, 192 e 384
     "run_cicli": [
         "etth1",
-        "electricity",
+       # "ettm1",
+       # "electricity",
     ],
 
     # Sweep top_k × numero di TimesBlock
     "run_times_block": [
         "etth1",
-        "ettm1",
-        "electricity",
+       # "ettm1",
+       # "electricity",
     ],
 
     # Confronto dei backbone leggeri
     "run_backbone2d": [
         "etth1",
-        "electricity",
+       # "ettm1",
+       # "electricity",
     ],
 
     # Confronto periodi 24, 48 e 17
     "run_fixed_period": [
         "etth1",
-        "ettm1",
-        "electricity",
+       # "ettm1",
+       # "electricity",
     ],
 }
 
