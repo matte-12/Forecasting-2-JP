@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 
 #cambiato InceptionBlock2D con questa:
+# ottimo, riduce di molto i FLOPs rispetto alle convoluzioni standard
 class DepthwiseSeparableBlock2D(nn.Module):
     def __init__(self, channels):
         super().__init__()
