@@ -299,7 +299,7 @@ def main():
     total_training_time = time.perf_counter() - training_start
 
     # Salvataggio Curve in PDF
-    save_learning_curves(train_history, early_stopping.best_epoch, exp_dir / "learning_curves.pdf")
+    save_learning_curves(train_history, early_stopping.best_epoch_idx, exp_dir / "learning_curves.pdf")
 
     # --- TESTING E INFERENZA ---
     model.load_state_dict(torch.load(str(ckpt_path), map_location=device))
