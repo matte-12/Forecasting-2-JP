@@ -1,5 +1,4 @@
 import argparse
-import os
 import random
 import time
 import json
@@ -41,14 +40,14 @@ class EarlyStopping:
         self.early_stop = False
         self.val_loss_min = np.inf
         self.path = path
-        self.best_epoch = 0
+        self.best_epoch_idx = 0  # Aggiunto per tracciare l'indice
 
-    def __call__(self, val_loss, model, epoch):
+    def __call__(self, val_loss, model, epoch_idx):
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
             self.save_checkpoint(val_loss, model)
-            self.best_epoch = epoch
+            self.best_epoch_idx = epoch_idx
         elif score < self.best_score:
             self.counter += 1
             if self.counter >= self.patience:
@@ -56,7 +55,7 @@ class EarlyStopping:
         else:
             self.best_score = score
             self.save_checkpoint(val_loss, model)
-            self.best_epoch = epoch
+            self.best_epoch_idx = epoch_idx
             self.counter = 0
 
     def save_checkpoint(self, val_loss, model):
@@ -294,7 +293,7 @@ def main():
         
         early_stopping(val_mse_epoch, model, epoch)
         if early_stopping.early_stop:
-            print("🛑 Early Stopping Innescato.")
+            print("  Early Stopping Innescato.")
             break
 
     total_training_time = time.perf_counter() - training_start
@@ -328,6 +327,10 @@ def main():
         "seq_len": seq_len
     }
 
+    best_epoch_idx = early_stopping.best_epoch_idx
+    # Somma dei tempi di epoca fino alla best epoch (inclusa)
+    time_to_best = sum(train_history["epoch_time_seconds"][:best_epoch_idx + 1])
+
     # Iniezione condizionale delle metriche architetturali
     if args.model == "TimesNetOriginal":
         metrics["top_k"] = top_k
@@ -337,6 +340,8 @@ def main():
         metrics["num_blocks"] = num_blocks
 
     metrics.update({
+        "best_epoch": int(best_epoch_idx + 1),
+        "time_to_best_epoch_seconds": float(time_to_best),
         "test_mse": float(mse),
         "test_mae": float(mae),
         "test_mase": float(mase),
@@ -348,7 +353,7 @@ def main():
         "checkpoint_size_mb": float(ckpt_path.stat().st_size / 1024**2)
     })
     
-    print(f"\n📊 Risultati Test -> MSE: {mse:.4f} | MAE: {mae:.4f} | MASE: {mase:.4f}")
+    print(f"\n  Risultati Test -> MSE: {mse:.4f} | MAE: {mae:.4f} | MASE: {mase:.4f}")
 
     with open(exp_dir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=4)
