@@ -72,7 +72,7 @@ def main():
     # Ordiniamo per Configurazione per mantenere log sequenziali puliti
     sorted_commands = sorted(list(unique_commands), key=lambda x: (x[1], x[0]))
     
-    print(f"🚀 INIZIO PIPELINE: {len(sorted_commands)} esperimenti univoci pronti all'esecuzione.")
+    print(f"  INIZIO PIPELINE: {len(sorted_commands)} esperimenti univoci pronti all'esecuzione.")
     failed_runs = []
 
     for idx, (model, config, seq, period, top_k, blocks) in enumerate(sorted_commands):
@@ -92,7 +92,7 @@ def main():
             cmd.extend(["--override-num-blocks", str(blocks)])
 
         print("\n" + "="*90)
-        print(f"⚡ RUN [{idx+1}/{len(sorted_commands)}]: {' '.join(cmd)}")
+        print(f"  RUN [{idx+1}/{len(sorted_commands)}]: {' '.join(cmd)}")
         print("="*90)
         
         res = subprocess.run(cmd, cwd=str(project_root))
