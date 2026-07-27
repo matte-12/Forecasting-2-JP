@@ -241,7 +241,7 @@ def main():
     exp_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = exp_dir / "best_model.pth"
 
-    print(f"🚀 Modello: {args.model} | Config: {args.config} | Parametri: {parameter_count:,}")
+    print(f"  Modello: {args.model} | Config: {args.config} | Parametri: {parameter_count:,}")
     
     _, train_loader = build_dataloader(config, flag="train")
     _, val_loader = build_dataloader(config, flag="val")
