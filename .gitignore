@@ -8,6 +8,7 @@ experiments/
 *.pt
 *.pth
 *.ckpt
+*.zip
 
 # Colab
 .ipynb_checkpoints/
