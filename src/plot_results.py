@@ -221,7 +221,7 @@ def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
     df_base = df[(df['dataset'] == dataset) & (df['pred_len'] == pred_len)].copy()
     if df_base.empty: return
 
-    for col in ['seq_len', 'fixed_period', 'top_k', 'num_blocks', 'test_mse']:
+    for col in ['seq_len', 'fixed_period', 'top_k', 'num_blocks', 'test_mse', 'trainable_parameters']:
         if col in df_base.columns:
             df_base[col] = pd.to_numeric(df_base[col], errors='coerce')
 
@@ -272,18 +272,18 @@ def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
             yval = bar.get_height()
             axes[2].text(bar.get_x() + bar.get_width()/2, yval + (fp_df['test_mse'].max() * 0.02), f'{yval:.3f}', ha='center', fontweight='bold')
 
-    # PLOT D: Pareto Front Efficienza Spaziale
-    bb_models = ['LightTimesNet_MultiScale', 'LightTimesNet_Depthwise', 'LightTimesNet_Group', 'LightTimesNet_SingleKernel']
+    # PLOT D: Pareto Front Efficienza Spaziale (Aggiornato a Trainable Parameters + DLinear)
+    bb_models = ['LightTimesNet_MultiScale', 'LightTimesNet_Depthwise', 'LightTimesNet_Group', 'LightTimesNet_SingleKernel', 'DLinear']
     bb_df = df_base[(df_base['model'].isin(bb_models)) & (df_base['seq_len'] == 96)].copy()
     
     if not bb_df.empty:
-        markers = ['*', 'o', 's', 'X']
+        markers = ['*', 'o', 's', 'X', 'D'] # Aggiunto diamante per DLinear
         pareto_points = []
         
-        for idx, row in bb_df.iterrows():
-            x_val = row.get('average_epoch_time_seconds')
+        for _, row in bb_df.iterrows():
+            x_val = row.get('trainable_parameters')
             if pd.isna(x_val):
-                x_val = row.get('total_training_time_seconds', 0) / 20.0
+                continue
                 
             y_val = row['test_mse']
             model_clean = row['model'].replace('LightTimesNet_', '')
@@ -292,7 +292,7 @@ def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
             axes[3].scatter(x_val, y_val, label=model_clean, marker=marker, s=200, edgecolors='black', zorder=3)
             pareto_points.append((x_val, y_val))
             
-        # Calcolo Frontiera di Pareto (Minimizzare X e Y)
+        # Calcolo Frontiera di Pareto (Minimizzare Parametri X e MSE Y)
         pareto_points.sort(key=lambda p: (p[0], p[1]))
         front = []
         min_y = float('inf')
@@ -309,8 +309,9 @@ def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
             axes[3].plot(front_x, front_y, 'k--', alpha=0.6, linewidth=2, label='Pareto Front', zorder=2)
             
         axes[3].set_title('D. Spatial Backbone Efficiency', fontweight='bold')
-        axes[3].set_xlabel('Average Epoch Time (s)')
+        axes[3].set_xlabel('Trainable Parameters') # Asse aggiornato
         axes[3].set_ylabel('Test MSE')
+        axes[3].set_xscale('log') # Scala logaritmica utile data l'inclusione di DLinear
         axes[3].legend()
 
     plt.tight_layout()
