@@ -11,18 +11,20 @@ class MultiScaleInceptionBlock2D(nn.Module):
     Applica kernel 1x1, 3x3 e 5x5 in parallelo e combina i risultati tramite media
     per mantenere l'allineamento matematico con il TimesNet originale.
     """
-    def __init__(self, in_channels: int, out_channels: int, kernel_sizes=(1, 3, 5)):
+    def __init__(self, in_channels: int, out_channels: int, kernel_sizes=(1, 3, 5), reduction_factor: int = 2):
         super().__init__()
         if not kernel_sizes:
             raise ValueError("kernel_sizes non può essere vuoto.")
         if any(kernel <= 0 or kernel % 2 == 0 for kernel in kernel_sizes):
             raise ValueError("I kernel devono essere interi positivi e dispari.")
 
+        mid_channels = max(4, in_channels // reduction_factor)
         self.kernel_sizes = tuple(int(kernel) for kernel in kernel_sizes)
         self.branches = nn.ModuleList([
             nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=kernel, padding=kernel // 2),
+                nn.Conv2d(in_channels, mid_channels, kernel_size=kernel, padding=kernel // 2),
                 nn.GELU(),
+                nn.Conv2d(mid_channels, out_channels, kernel_size=1) # Riproietta a out_channels
             ) for kernel in self.kernel_sizes
         ])
 
@@ -45,9 +47,10 @@ class DepthwiseSeparableBlock2D(nn.Module):
             nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1, groups=in_channels),
             nn.Conv2d(in_channels, out_channels, kernel_size=1),
             nn.GELU(),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, groups=out_channels),
-            nn.Conv2d(out_channels, out_channels, kernel_size=1),
-            nn.GELU(),
+            # trial to avoid overfitting
+            # nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, groups=out_channels),
+            # nn.Conv2d(out_channels, out_channels, kernel_size=1),
+            # nn.GELU(),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -102,10 +105,11 @@ class LightTimesBlock(nn.Module):
     """
     def __init__(
         self, d_model: int, fixed_period: int = 24, block_type: str = "multiscale",
-        kernel_sizes=(1, 3, 5), kernel_size: int = 3, groups: int = 4
+        kernel_sizes=(1, 3, 5), kernel_size: int = 3, groups: int = 4, dropout: float = 0.1
     ):
         super().__init__()
         self.fixed_period = max(1, int(fixed_period))
+        self.dropout = nn.Dropout(dropout)
 
         if block_type == "multiscale":
             self.conv_2d = MultiScaleInceptionBlock2D(d_model, d_model, kernel_sizes)
@@ -141,8 +145,11 @@ class LightTimesBlock(nn.Module):
         # [B, C, cicli, periodo] -> [B, T, C]
         out_1d = out_2d.permute(0, 2, 3, 1).reshape(batch_size, length_needed, channels)
         
-        # Troncamento e Residual Connection
-        return out_1d[:, :time_steps, :] + x
+        # Troncamento alla lunghezza originale
+        out_truncated = out_1d[:, :time_steps, :]
+        
+        # Residual Dropout: applicato solo alla trasformazione spaziale prima dell'addizione
+        return self.dropout(out_truncated) + x
 
 # ============================================================
 # 6. MODELLO LIGHT GENERICO (Aggiornato per num_blocks)

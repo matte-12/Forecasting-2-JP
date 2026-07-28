@@ -319,6 +319,7 @@ def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
     plt.savefig(save_path, dpi=300, format='pdf')
     print(f"OK Documento PDF Vettoriale 2x2 salvato: {save_path}")
 
+
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parent.parent
     exp_dir = project_root / "experiments"
@@ -326,5 +327,8 @@ if __name__ == "__main__":
     df_metrics = load_all_metrics(exp_dir)
     if not df_metrics.empty:
         export_excel_tables(df_metrics)
-        plot_experiments(df_metrics, dataset="ETTh1", pred_len=96)
-        plot_experiments(df_metrics, dataset="electricity", pred_len=96)
+        
+        # Iteriamo su tutti e tre gli orizzonti per entrambi i dataset
+        for h in [24, 48, 96]:
+            plot_experiments(df_metrics, dataset="ETTh1", pred_len=h)
+            plot_experiments(df_metrics, dataset="electricity", pred_len=h)
