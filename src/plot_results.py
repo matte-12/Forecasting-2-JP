@@ -40,12 +40,7 @@ def load_all_metrics(exp_dir: Path) -> pd.DataFrame:
             
     return pd.DataFrame(records)
 
-
 def export_excel_tables(df: pd.DataFrame):
-    """
-    Genera 4 file CSV che riproducono l'alberatura del file tabelle_report.xlsx.
-    Genera inoltre il plot vettoriale (PDF) della tabella di ablazione del periodo.
-    """
     print("\n" + "="*80)
     print("  ESPORTAZIONE TABELLE REPORT (CSV e PDF)")
     print("="*80)
@@ -54,7 +49,7 @@ def export_excel_tables(df: pd.DataFrame):
                     'test_mse', 'test_mae', 'test_mase', 'trainable_parameters', 
                     'checkpoint_size_mb', 'best_epoch', 'time_to_best_epoch_seconds', 
                     'average_epoch_time_seconds', 'total_training_time_seconds', 
-                    'inference_ms_per_sample']
+                    'inference_ms_per_sample', 'masked_features']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -82,13 +77,11 @@ def export_excel_tables(df: pd.DataFrame):
         pt2 = pd.pivot_table(t2_df, values=['test_mse', 'test_mae'], index=['dataset', 'pred_len'], columns=['fixed_period'], aggfunc='first')
         
         if not pt2.empty:
-            # Calcolo media periodi
             for metric in ['test_mse', 'test_mae']:
                 num_cols = [c for c in pt2[metric].columns if isinstance(c, (int, float))]
                 if num_cols:
                     pt2[(metric, 'Avg_Periods')] = pt2[metric][num_cols].mean(axis=1)
                     
-            # Aggiunta colonna DLinear
             dl_df = df[(df['model'] == 'DLinear') & (df['seq_len'] == 96)]
             if not dl_df.empty:
                 dl_mse_map = dl_df.set_index(['dataset', 'pred_len'])['test_mse'].to_dict()
@@ -127,7 +120,7 @@ def export_excel_tables(df: pd.DataFrame):
     except Exception as e:
         print(f"  Errore Tabella 3: {e}")
 
-    # TABELLA 4: backbone_efficiency + DLinear (Baseline Spaziale)
+    # TABELLA 4: backbone_efficiency + DLinear
     try:
         bb_models = ['LightTimesNet_MultiScale', 'LightTimesNet_Depthwise', 'LightTimesNet_Group', 'LightTimesNet_SingleKernel']
         cond_tn_t4 = (df['model'] == 'TimesNetOriginal') & (df['top_k'] == 2) & (df['num_blocks'] == 1)
@@ -158,13 +151,12 @@ def export_excel_tables(df: pd.DataFrame):
     except Exception as e:
         print(f"  Errore Tabella 4: {e}")
 
-    # PLOT TABELLA IMMAGINE (Con Aggregazione Avg e Comparazione DLinear)
+    # PLOT TABELLA IMMAGINE
     try:
         df_img = df[(df['model'] == 'FixedPeriodInception') & (df['seq_len'] == 96)].copy()
         if not df_img.empty:
             pt_img = pd.pivot_table(df_img, values='test_mse', index=['dataset', 'pred_len', 'num_blocks'], columns=['fixed_period'], aggfunc='first')
             
-            # Calcolo media
             num_cols = [c for c in pt_img.columns if isinstance(c, (int, float))]
             pt_img['Avg_Periods'] = pt_img[num_cols].mean(axis=1)
             
@@ -215,7 +207,6 @@ def export_excel_tables(df: pd.DataFrame):
             print("  plot_visual_table_ablation.pdf esportato (Pronto per LaTeX).")
     except Exception as e:
         print(f"  Errore Plot Tabella Immagine: {e}")
-
 
 def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
     df_base = df[(df['dataset'] == dataset) & (df['pred_len'] == pred_len)].copy()
@@ -277,7 +268,7 @@ def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
     bb_df = df_base[(df_base['model'].isin(bb_models)) & (df_base['seq_len'] == 96)].copy()
     
     if not bb_df.empty:
-        markers = ['*', 'o', 's', 'X', 'D'] # Aggiunto diamante per DLinear
+        markers = ['*', 'o', 's', 'X', 'D'] 
         pareto_points = []
         
         for _, row in bb_df.iterrows():
@@ -309,9 +300,9 @@ def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
             axes[3].plot(front_x, front_y, 'k--', alpha=0.6, linewidth=2, label='Pareto Front', zorder=2)
             
         axes[3].set_title('D. Spatial Backbone Efficiency', fontweight='bold')
-        axes[3].set_xlabel('Trainable Parameters') # Asse aggiornato
+        axes[3].set_xlabel('Trainable Parameters')
         axes[3].set_ylabel('Test MSE')
-        axes[3].set_xscale('log') # Scala logaritmica utile data l'inclusione di DLinear
+        axes[3].set_xscale('log') 
         axes[3].legend()
 
     plt.tight_layout()
@@ -319,6 +310,56 @@ def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
     plt.savefig(save_path, dpi=300, format='pdf')
     print(f"OK Documento PDF Vettoriale 2x2 salvato: {save_path}")
 
+def plot_mase_masking(df: pd.DataFrame):
+    """
+    Genera un plot a barre per visualizzare la percentuale di feature scartate dal MASE.
+    Traccia una threshold del 5% per la reliability metrica.
+    """
+    if 'masked_features' not in df.columns or df['masked_features'].isnull().all():
+        print("  Nessun dato sui masked_features trovato. Eseguire prima un run aggiornato.")
+        return
+        
+    print("\n" + "="*80)
+    print("  GENERAZIONE PLOT: ANALISI MASE BOOLEAN MASKING")
+    print("="*80)
+    
+    # Il masking dipende solo dallo split del test set (dataset + pred_len), isoliamo DLinear
+    df_mask = df[df['model'] == 'DLinear'].copy() 
+    if df_mask.empty:
+        df_mask = df.drop_duplicates(subset=['dataset', 'pred_len']).copy()
+        
+    df_mask['total_features'] = df_mask['dataset'].apply(lambda x: 321 if 'electricity' in str(x).lower() else 7)
+    df_mask['masked_pct'] = (df_mask['masked_features'] / df_mask['total_features']) * 100
+    
+    # Ordinamento per dataset e orizzonte
+    df_mask = df_mask.sort_values(by=['dataset', 'pred_len'])
+    
+    labels = [f"{str(d).upper()} (H={int(h)})" for d, h in zip(df_mask['dataset'], df_mask['pred_len'])]
+    pcts = df_mask['masked_pct'].values
+    counts = df_mask['masked_features'].values
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.bar(labels, pcts, color='#E24A33', edgecolor='black')
+    
+    threshold = 5.0
+    ax.axhline(threshold, color='black', linestyle='--', linewidth=2, label=f'Reliability Threshold ({threshold}%)')
+    
+    ax.set_ylabel('Masked Features (%)')
+    ax.set_title('Impact of Boolean Masking on MASE Computation', fontweight='bold', pad=15)
+    
+    max_y = max(max(pcts) * 1.2, threshold * 1.5) if len(pcts) > 0 else 10
+    ax.set_ylim(0, max_y)
+    
+    for bar, count in zip(bars, counts):
+        yval = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2, yval + (max_y * 0.02), f"{int(count)} feat.", ha='center', va='bottom', fontweight='bold')
+        
+    ax.legend()
+    plt.xticks(rotation=15)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig("mase_masking_analysis.pdf", dpi=300, format='pdf')
+    print("  Documento PDF Vettoriale salvato: mase_masking_analysis.pdf")
 
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parent.parent
@@ -328,7 +369,8 @@ if __name__ == "__main__":
     if not df_metrics.empty:
         export_excel_tables(df_metrics)
         
-        # Iteriamo su tutti e tre gli orizzonti per entrambi i dataset
         for h in [24, 48, 96]:
             plot_experiments(df_metrics, dataset="ETTh1", pred_len=h)
             plot_experiments(df_metrics, dataset="electricity", pred_len=h)
+            
+        plot_mase_masking(df_metrics)

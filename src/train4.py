@@ -314,7 +314,9 @@ def main():
     preds = np.concatenate(preds, axis=0)
     trues = np.concatenate(trues, axis=0)
     
-    mse, mae, mase = metric_mse(preds, trues), metric_mae(preds, trues), metric_mase(preds, trues)
+    mse = metric_mse(preds, trues)
+    mae = metric_mae(preds, trues)
+    mase_val, masked_features_count = metric_mase(preds, trues)
     
     inf_stats = measure_inference_time(model, test_loader, device)
 
@@ -344,7 +346,8 @@ def main():
         "time_to_best_epoch_seconds": float(time_to_best),
         "test_mse": float(mse),
         "test_mae": float(mae),
-        "test_mase": float(mase),
+        "test_mase": float(mase_val),
+        "masked_features": int(masked_features_count),
         "trainable_parameters": int(parameter_count),
         "total_training_time_seconds": float(total_training_time),
         "average_epoch_time_seconds": float(np.mean(train_history["epoch_time_seconds"])),
@@ -353,7 +356,7 @@ def main():
         "checkpoint_size_mb": float(ckpt_path.stat().st_size / 1024**2)
     })
     
-    print(f"\n  Risultati Test -> MSE: {mse:.4f} | MAE: {mae:.4f} | MASE: {mase:.4f}")
+    print(f"\n  Risultati Test -> MSE: {mse:.4f} | MAE: {mae:.4f} | MASE: {mase_val:.4f} (Masked Feat: {masked_features_count})")
 
     with open(exp_dir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=4)
