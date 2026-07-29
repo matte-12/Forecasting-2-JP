@@ -79,8 +79,8 @@ def export_excel_tables(df: pd.DataFrame):
                 f.write("\\begin{table*}[!htbp]\n\\centering\n\\caption{Cicli: Performance across different sequence lengths}\n\\label{tab:cicli}\n")
                 f.write("\\begin{tabular}{ll ccc ccc ccc ccc ccc ccc}\n\\toprule\n")
                 f.write("& & \\multicolumn{9}{c}{\\textbf{MAE}} & \\multicolumn{9}{c}{\\textbf{MSE}} \\\\\n")
-                f.write("\\cmidrule(lr){3-11} \\cmidrule(lr){12-20}\n")
-                f.write("& & \\multicolumn{3}{c}{Seq 96} & \\multicolumn{3}{c}{Seq 192} & \\multicolumn{3}{c}{Seq 384} & \\multicolumn{3}{c}{Seq 96} & \\multicolumn{3}{c}{Seq 192} & \\multicolumn{3}{c}{Seq 384} \\\\\n")
+                f.write("\\cmidrule{3-11} \\cmidrule{12-20}\n")
+                f.write("\\cmidrule{3-5} \\cmidrule{6-8} \\cmidrule{9-11} \\cmidrule{12-14} \\cmidrule{15-17} \\cmidrule{18-20}\n")
                 f.write("\\cmidrule(lr){3-5} \\cmidrule(lr){6-8} \\cmidrule(lr){9-11} \\cmidrule(lr){12-14} \\cmidrule(lr){15-17} \\cmidrule(lr){18-20}\n")
                 f.write("\\textbf{Dataset} & \\textbf{Pred} & CT & DL & FPI & CT & DL & FPI & CT & DL & FPI & CT & DL & FPI & CT & DL & FPI & CT & DL & FPI \\\\\n\\midrule\n")
                 
@@ -132,7 +132,7 @@ def export_excel_tables(df: pd.DataFrame):
                 f.write("\\begin{table*}[!htbp]\n\\centering\n\\caption{Period Sensitivity}\n\\label{tab:period_sensitivity}\n")
                 f.write("\\begin{tabular}{ll ccccc ccccc}\n\\toprule\n")
                 f.write("& & \\multicolumn{5}{c}{\\textbf{MAE}} & \\multicolumn{5}{c}{\\textbf{MSE}} \\\\\n")
-                f.write("\\cmidrule(lr){3-7} \\cmidrule(lr){8-12}\n")
+                f.write("\\cmidrule{3-7} \\cmidrule{8-12}\n")
                 f.write("\\textbf{Dataset} & \\textbf{Pred} & 17 & 24 & 48 & Avg & DLin & 17 & 24 & 48 & Avg & DLin \\\\\n\\midrule\n")
                 
                 periods = [17.0, 24.0, 48.0, 'Avg_Periods', 'DLinear']
@@ -171,9 +171,9 @@ def export_excel_tables(df: pd.DataFrame):
                 f.write("\\begin{table*}[!htbp]\n\\centering\n\\caption{Times Block vs Frequency (Top-$K$)}\n\\label{tab:times_block}\n")
                 f.write("\\begin{tabular}{llc ccc ccc ccc ccc ccc ccc}\n\\toprule\n")
                 f.write("& & & \\multicolumn{9}{c}{\\textbf{MAE}} & \\multicolumn{9}{c}{\\textbf{MSE}} \\\\\n")
-                f.write("\\cmidrule(lr){4-12} \\cmidrule(lr){13-21}\n")
+                f.write("\\cmidrule{4-12} \\cmidrule{13-21}\n")
                 f.write("& & & \\multicolumn{3}{c}{Pred 24} & \\multicolumn{3}{c}{Pred 48} & \\multicolumn{3}{c}{Pred 96} & \\multicolumn{3}{c}{Pred 24} & \\multicolumn{3}{c}{Pred 48} & \\multicolumn{3}{c}{Pred 96} \\\\\n")
-                f.write("\\cmidrule(lr){4-6} \\cmidrule(lr){7-9} \\cmidrule(lr){10-12} \\cmidrule(lr){13-15} \\cmidrule(lr){16-18} \\cmidrule(lr){19-21}\n")
+                f.write("\\cmidrule{4-6} \\cmidrule{7-9} \\cmidrule{10-12} \\cmidrule{13-15} \\cmidrule{16-18} \\cmidrule{19-21}\n")
                 f.write("\\textbf{Dataset} & \\textbf{Model} & \\textbf{Top-$K$} & 1B & 2B & 3B & 1B & 2B & 3B & 1B & 2B & 3B & 1B & 2B & 3B & 1B & 2B & 3B & 1B & 2B & 3B \\\\\n\\midrule\n")
                 
                 for idx, row in pt3.iterrows():
@@ -376,7 +376,7 @@ def plot_experiments(df: pd.DataFrame, dataset="ETTh1", pred_len=96):
     if not fp_df_c.empty:
         bars = ax_c.bar([str(int(p)) for p in fp_df_c['fixed_period'].dropna()], fp_df_c['test_mse'], color='#4C72B0', edgecolor='black')
         ax_c.set_title('C. Domain Knowledge Injection', fontweight='bold')
-        ax_c.set_xlabel('Forced Period')
+        ax_c.set_xlabel('Fixed Period')
         ax_c.set_ylabel('Test MSE')
         
         ax_c.set_ylim(0, fp_df_c['test_mse'].max() * 1.2)
