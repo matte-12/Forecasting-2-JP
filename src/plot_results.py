@@ -58,8 +58,9 @@ def export_excel_tables(df: pd.DataFrame):
     with open(tex_file, "w") as f:
         f.write("% Tabelle auto-generate per paper accademico.\n")
         f.write("\\clearpage\n\\onecolumn\n\\appendices\n\\section{Extended Experimental Results}\n\n")
-        f.write("% Impostazioni globali per uniformare le dimensioni ed evitare \\resizebox\n")
-        f.write("\\tiny\n\\setlength{\\tabcolsep}{1.5pt}\n\\renewcommand{\\arraystretch}{0.85}\n\n")
+        f.write("% Impostazioni globali per padding e interlinea\n")
+        f.write("\\setlength{\\tabcolsep}{1.5pt}\n\\renewcommand{\\arraystretch}{0.85}\n\n")
+
     # ==========================================
     # TABELLA 1: cicli
     # ==========================================
@@ -77,11 +78,12 @@ def export_excel_tables(df: pd.DataFrame):
             
             with open(tex_file, "a") as f:
                 f.write("\\begin{table*}[!htbp]\n\\centering\n\\caption{Cicli: Performance across different sequence lengths}\n\\label{tab:cicli}\n")
+                f.write("\\scriptsize\n")
                 f.write("\\begin{tabular}{ll ccc ccc ccc ccc ccc ccc}\n\\toprule\n")
                 f.write("& & \\multicolumn{9}{c}{\\textbf{MAE}} & \\multicolumn{9}{c}{\\textbf{MSE}} \\\\\n")
                 f.write("\\cmidrule{3-11} \\cmidrule{12-20}\n")
+                f.write("& & \\multicolumn{3}{c}{Seq 96} & \\multicolumn{3}{c}{Seq 192} & \\multicolumn{3}{c}{Seq 384} & \\multicolumn{3}{c}{Seq 96} & \\multicolumn{3}{c}{Seq 192} & \\multicolumn{3}{c}{Seq 384} \\\\\n")
                 f.write("\\cmidrule{3-5} \\cmidrule{6-8} \\cmidrule{9-11} \\cmidrule{12-14} \\cmidrule{15-17} \\cmidrule{18-20}\n")
-                f.write("\\cmidrule(lr){3-5} \\cmidrule(lr){6-8} \\cmidrule(lr){9-11} \\cmidrule(lr){12-14} \\cmidrule(lr){15-17} \\cmidrule(lr){18-20}\n")
                 f.write("\\textbf{Dataset} & \\textbf{Pred} & CT & DL & FPI & CT & DL & FPI & CT & DL & FPI & CT & DL & FPI & CT & DL & FPI & CT & DL & FPI \\\\\n\\midrule\n")
                 
                 models = ['CausalTCN', 'DLinear', 'FixedPeriodInception']
@@ -130,6 +132,7 @@ def export_excel_tables(df: pd.DataFrame):
 
             with open(tex_file, "a") as f:
                 f.write("\\begin{table*}[!htbp]\n\\centering\n\\caption{Period Sensitivity}\n\\label{tab:period_sensitivity}\n")
+                f.write("\\scriptsize\n")
                 f.write("\\begin{tabular}{ll ccccc ccccc}\n\\toprule\n")
                 f.write("& & \\multicolumn{5}{c}{\\textbf{MAE}} & \\multicolumn{5}{c}{\\textbf{MSE}} \\\\\n")
                 f.write("\\cmidrule{3-7} \\cmidrule{8-12}\n")
@@ -169,13 +172,14 @@ def export_excel_tables(df: pd.DataFrame):
             
             with open(tex_file, "a") as f:
                 f.write("\\begin{table*}[!htbp]\n\\centering\n\\caption{Times Block vs Frequency (Top-$K$)}\n\\label{tab:times_block}\n")
+                f.write("\\scriptsize\n")
                 f.write("\\begin{tabular}{llc ccc ccc ccc ccc ccc ccc}\n\\toprule\n")
                 f.write("& & & \\multicolumn{9}{c}{\\textbf{MAE}} & \\multicolumn{9}{c}{\\textbf{MSE}} \\\\\n")
                 f.write("\\cmidrule{4-12} \\cmidrule{13-21}\n")
                 f.write("& & & \\multicolumn{3}{c}{Pred 24} & \\multicolumn{3}{c}{Pred 48} & \\multicolumn{3}{c}{Pred 96} & \\multicolumn{3}{c}{Pred 24} & \\multicolumn{3}{c}{Pred 48} & \\multicolumn{3}{c}{Pred 96} \\\\\n")
                 f.write("\\cmidrule{4-6} \\cmidrule{7-9} \\cmidrule{10-12} \\cmidrule{13-15} \\cmidrule{16-18} \\cmidrule{19-21}\n")
                 f.write("\\textbf{Dataset} & \\textbf{Model} & \\textbf{Top-$K$} & 1B & 2B & 3B & 1B & 2B & 3B & 1B & 2B & 3B & 1B & 2B & 3B & 1B & 2B & 3B & 1B & 2B & 3B \\\\\n\\midrule\n")
-                
+
                 for idx, row in pt3.iterrows():
                     dataset, model, top_k = idx
                     ds_str = str(dataset).replace('electricity', 'elec.')
@@ -222,13 +226,17 @@ def export_excel_tables(df: pd.DataFrame):
             
             with open(tex_file, "a") as f:
                 f.write("\\begin{table*}[!htbp]\n\\centering\n\\caption{Backbone Efficiency Analysis}\n\\label{tab:backbone_efficiency}\n")
+                f.write("\\scriptsize\n")
                 f.write("\\begin{tabular}{llc ccc ccc ccc c}\n\\toprule\n")
                 f.write("\\textbf{Dataset} & \\textbf{Model} & \\textbf{Pred} & \\textbf{MSE} & \\textbf{MAE} & \\textbf{MASE} & \\textbf{Params} & \\textbf{Ckpt (MB)} & \\textbf{Best Ep.} & \\textbf{T/Best} & \\textbf{Avg Ep.} & \\textbf{Tot. T.} & \\textbf{Inf (ms)} \\\\\n\\midrule\n")
                 
                 pt4_flat = pt4.reset_index()
                 for _, row in pt4_flat.iterrows():
                     ds_str = str(row['dataset']).replace('electricity', 'elec.')
-                    mod_str = str(row['model']).replace('LightTimesNet_', 'LTN_').replace('TimesNetOriginal', 'TN')
+                    
+                    # FIX PER UNDERSCORE: escape LaTeX (\_) per evitare crash tipografici
+                    mod_str = str(row['model']).replace('LightTimesNet_', 'LTN\\_').replace('TimesNetOriginal', 'TN')
+                    
                     pred = int(row['pred_len']) if pd.notna(row['pred_len']) else "-"
                     
                     def fmt(val, template="{:.3f}"): return template.format(val) if pd.notna(val) else "-"
