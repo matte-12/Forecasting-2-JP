@@ -8,13 +8,26 @@ def metric_mae(pred, true):
 
 def metric_mase(pred, true):
     """
-    Mean Absolute Scaled Error (MASE) batch-level.
-    Calcola l'errore rispetto al Naive Forecast (shift di 1 step) del target.
-    Aggiunge epsilon al denominatore per evitare divisioni per zero.
+    Mean Absolute Scaled Error (MASE) robusto per dataset multivariati ad alta dimensionalità.
+    Ignora automaticamente le feature costanti per evitare l'esplosione della media.
+    Restituisce il valore MASE e il numero di feature ignorate.
     """
-    mae_pred = np.mean(np.abs(pred - true))
-    # Naive forecast basato sulla vera serie storica (Y_t - Y_{t-1})
-    naive_err = np.abs(true[:, 1:, :] - true[:, :-1, :])
-    mae_naive = np.mean(naive_err)
+    # MAE del modello per singola feature: shape [Num_Features]
+    mae_pred_per_feature = np.mean(np.abs(pred - true), axis=(0, 1))
     
-    return mae_pred / (mae_naive + 1e-8)
+    # MAE del Naive forecast (Random Walk) per singola feature
+    naive_diff = np.abs(true[:, 1:, :] - true[:, :-1, :])
+    mae_naive_per_feature = np.mean(naive_diff, axis=(0, 1))
+    
+    # Maschera booleana: identifica i contatori attivi (denominatore > soglia di rumore)
+    active_sensors_mask = mae_naive_per_feature > 1e-5
+    masked_count = int(np.sum(~active_sensors_mask))
+    
+    if not np.any(active_sensors_mask):
+        return np.nan, masked_count # Se l'intero dataset è piatto
+        
+    # Calcola il rapporto solo sulle feature valide
+    mase_valid = mae_pred_per_feature[active_sensors_mask] / mae_naive_per_feature[active_sensors_mask]
+    
+    # Restituisce la media calcolata esclusivamente sui sensori operativi e il numero di feature filtrate
+    return np.mean(mase_valid), masked_count

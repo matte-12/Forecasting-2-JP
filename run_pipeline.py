@@ -1,4 +1,5 @@
 import subprocess
+import time
 from pathlib import Path
 
 def main():
@@ -72,8 +73,11 @@ def main():
     # Ordiniamo per Configurazione per mantenere log sequenziali puliti
     sorted_commands = sorted(list(unique_commands), key=lambda x: (x[1], x[0]))
     
-    print(f"🚀 INIZIO PIPELINE: {len(sorted_commands)} esperimenti univoci pronti all'esecuzione.")
+    print(f"  INIZIO PIPELINE: {len(sorted_commands)} esperimenti univoci pronti all'esecuzione.")
     failed_runs = []
+
+    # Inizio tracciamento del tempo
+    start_time = time.time()
 
     for idx, (model, config, seq, period, top_k, blocks) in enumerate(sorted_commands):
         # Utilizzato il tuo comando -m src.train4
@@ -92,18 +96,22 @@ def main():
             cmd.extend(["--override-num-blocks", str(blocks)])
 
         print("\n" + "="*90)
-        print(f"⚡ RUN [{idx+1}/{len(sorted_commands)}]: {' '.join(cmd)}")
+        print(f"  RUN [{idx+1}/{len(sorted_commands)}]: {' '.join(cmd)}")
         print("="*90)
         
         res = subprocess.run(cmd, cwd=str(project_root))
         if res.returncode != 0:
             failed_runs.append(' '.join(cmd))
 
+    # Calcolo tempo trascorso in minuti
+    elapsed_seconds = time.time() - start_time
+    elapsed_minutes = elapsed_seconds / 60
+
     print("\n" + "="*90)
     if not failed_runs:
-        print("✅ PIPELINE COMPLETATA CON SUCCESSO! Zero Errori.")
+        print(f"  PIPELINE COMPLETATA CON SUCCESSO! Zero Errori. Tempo totale: {elapsed_minutes:.2f} minuti.")
     else:
-        print(f"⚠️ PIPELINE COMPLETATA. Ci sono {len(failed_runs)} errori:")
+        print(f"  PIPELINE COMPLETATA. Tempo totale: {elapsed_minutes:.2f} minuti. Ci sono {len(failed_runs)} errori:")
         for r in failed_runs:
             print(f" - {r}")
     print("="*90)
